@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">
+  <!-- 南斯拉夫社会主义联邦共和国 1945–1992：蓝白红三横 + 红星 -->
+  <rect width="720" height="160" fill="#003893"/>
+  <rect y="160" width="720" height="160" fill="#FFFFFF"/>
+  <rect y="320" width="720" height="160" fill="#DE0000"/>
+  <polygon points="360,170 375.7,218.4 426.6,218.4 426.6,261.6 401.1,296.6 360,266.7 318.9,296.6 293.4,261.6 293.4,218.4 318.9,218.4" fill="#DE0000"/>
+</svg>

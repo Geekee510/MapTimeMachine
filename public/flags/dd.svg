@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">
+  <!-- 德意志民主共和国（东德）1959–1990：黑红金三横 + 国徽（麦穗环/锤子/圆规，示意简化） -->
+  <rect width="720" height="160" fill="#000000"/>
+  <rect y="160" width="720" height="160" fill="#DD0000"/>
+  <rect y="320" width="720" height="160" fill="#FFCE00"/>
+  <g transform="translate(360 240)">
+    <g fill="none" stroke="#6b4d00" stroke-width="6" stroke-linecap="round">
+      <path d="M -52 14 A 56 56 0 0 1 -40 -42"/>
+      <path d="M 52 14 A 56 56 0 0 0 40 -42"/>
+    </g>
+    <g fill="#6b4d00">
+      <ellipse cx="-55" cy="8" rx="7" ry="3.4" transform="rotate(-78 -55 8)"/>
+      <ellipse cx="-58" cy="-6" rx="7" ry="3.4" transform="rotate(-58 -58 -6)"/>
+      <ellipse cx="-55" cy="-20" rx="7" ry="3.4" transform="rotate(-38 -55 -20)"/>
+      <ellipse cx="-49" cy="-33" rx="7" ry="3.4" transform="rotate(-18 -49 -33)"/>
+      <ellipse cx="55" cy="8" rx="7" ry="3.4" transform="rotate(78 55 8)"/>
+      <ellipse cx="58" cy="-6" rx="7" ry="3.4" transform="rotate(58 58 -6)"/>
+      <ellipse cx="55" cy="-20" rx="7" ry="3.4" transform="rotate(38 55 -20)"/>
+      <ellipse cx="49" cy="-33" rx="7" ry="3.4" transform="rotate(18 49 -33)"/>
+    </g>
+    <g transform="rotate(-40)">
+      <rect x="-3.5" y="-26" width="7" height="52" fill="#111111"/>
+      <rect x="-20" y="-34" width="40" height="13" rx="2" fill="#111111"/>
+    </g>
+    <g stroke="#A5151C" stroke-width="5" fill="none" stroke-linecap="round">
+      <path d="M -15 24 L 0 -30"/>
+      <path d="M 15 24 L 0 -30"/>
+    </g>
+    <circle cx="0" cy="-30" r="5" fill="#A5151C"/>
+  </g>
+</svg>

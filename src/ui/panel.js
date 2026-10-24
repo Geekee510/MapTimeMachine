@@ -7,8 +7,10 @@ import { getEvents } from '../data/events.js';
 // 历史政权去括号后回退到继承国代码。info-name 用 <img> 渲染（Windows 不支持 emoji 旗帜字形）。
 const FLAGS = {
   'China': 'cn', 'United States of America': 'us', 'Russia': 'ru',
-  'Russia (Soviet Union)': 'ru', 'United Kingdom': 'gb', 'France': 'fr',
+  'Russia (Soviet Union)': 'ru',   'United Kingdom': 'gb', 'France': 'fr',
   'Germany': 'de', 'Germany (Prussia)': 'de', 'Japan': 'jp', 'India': 'in',
+  'Italy/Sardinia': 'it', 'Italy': 'it',
+  'German Democratic Republic': 'dd', 'Yugoslavia': 'yu',
   'Italy': 'it', 'Spain': 'es', 'Portugal': 'pt', 'Netherlands': 'nl',
   'Belgium': 'be', 'Switzerland': 'ch', 'Austria': 'at', 'Austria-Hungary': 'at',
   'Poland': 'pl', 'Czech Republic': 'cz', 'Czechoslovakia': 'cz', 'Hungary': 'hu',
@@ -88,12 +90,13 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
   tBasemap.addEventListener('change', () => onToggleLayer('basemapLand', tBasemap.checked));
   tZh.addEventListener('change', () => onToggleLayer('zh', tZh.checked));
   resetBtn.addEventListener('click', onReset);
-  infoClose.addEventListener('click', () => {
+  const closeInfo = () => {
     info.classList.add('hidden');
     infoEvents.classList.add('hidden');
     infoEvents.innerHTML = '';
     lastProps = null;
-  });
+  };
+  infoClose.addEventListener('click', closeInfo);
 
   const STATUS_LABEL = {
     independent: ['独立国家', '#96be8c'],
@@ -167,10 +170,11 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
       twFlag.className = 'flag'; twFlag.src = 'flags/cn.svg'; twFlag.alt = 'cn';
       name.prepend(twFlag);
       body.innerHTML =
-        `<div><span class="k">归属：</span><span class="status-tag" style="background:#c84646">中国台湾</span></div>` +
+        `<div><span class="k">归属：</span><span class="status-tag" style="background:#c84646">中国</span></div>` +
         `<div><span class="k">说明：</span>台湾是中国不可分割的一部分。</div>`;
       info.classList.remove('hidden');
       hideEvents();
+      lastProps = null; // 静态卡：不随世界模式年份拖动而刷新
       if (onShowInfo) onShowInfo(props);
       return;
     }
@@ -214,46 +218,17 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
   }
 
   return {
-    // 中国模式：自动展示“中国介绍”总览卡（名称/简介 + 中国重大历史事件）
-    showChinaOverview() {
-      lastProps = null;
-      const name = document.getElementById('info-name');
-      const body = document.getElementById('info-body');
-      name.textContent = '中国（China）';
-      const cnFlag = document.createElement('img');
-      cnFlag.className = 'flag';
-      cnFlag.src = 'flags/cn.svg';
-      cnFlag.alt = 'cn';
-      name.prepend(cnFlag);
-      body.innerHTML =
-        `<div><span class="k">类型：</span><span class="status-tag" style="background:#c84646">文明古国 / 统一多民族国家</span></div>` +
-        `<div><span class="k">简介：</span>中华文明发源于黄河、长江流域，延续五千年；历夏商周、秦汉、隋唐、宋元、明清至近现代，形成统一多民族国家。</div>`;
-      info.classList.remove('hidden');
-      if (infoEvents) {
-        const evs = getEvents('China').slice().sort((a, b) => a.year - b.year);
-        if (evs.length) {
-          const items = evs
-            .map(
-              (e) =>
-                `<li><span class="ev-year">${e.year}</span>` +
-                `<span class="ev-main"><span class="ev-title">${e.title}</span>` +
-                (e.desc ? `<span class="ev-desc">${e.desc}</span>` : '') +
-                `</span></li>`
-            )
-            .join('');
-          infoEvents.innerHTML =
-            `<div class="ev-head">📜 中国 · 重大历史事件<br/>` +
-            `<span class="ev-sub">共 ${evs.length} 条</span></div>` +
-            `<ul class="ev-list">${items}</ul>`;
-          infoEvents.classList.remove('hidden');
-        } else {
-          hideEvents();
-        }
-      }
-    },
     showInfo(props) {
       lastProps = props;
       render(props);
+    },
+    // 当前展示中的对象（供世界模式按年份同步卡片；无则为 null）
+    currentProps() {
+      return lastProps;
+    },
+    // 关闭/清空介绍卡（如世界模式拖动到该国已不存在的年份）
+    hide() {
+      closeInfo();
     },
     // 中国历代疆域模式：展示朝代详情卡（起止/都城/简介/大事）；state=战国政权名（可选）
     showChinaInfo(d, state) {

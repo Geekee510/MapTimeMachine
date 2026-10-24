@@ -18,7 +18,20 @@ const outPath = path.join(root, 'public/data/china_dynasties.geojson');
 
 const prov = JSON.parse(fs.readFileSync(provPath, 'utf8'));
 
+// 外蒙古（今蒙古国）：元/清为中国领土，但不在 DataV 中国省界数据内。
+// 从 CShapes 提取蒙古国几何（1921~2023 一片 Polygon，近似外蒙古范围）。
+let outerMongoliaGeom = null;
+try {
+  const cshapes = JSON.parse(fs.readFileSync(path.join(root, 'public/data/cshapes-2.1.geojson'), 'utf8'));
+  const mg = cshapes.features.find((f) => (f.properties?.cntry_name || '') === 'Mongolia');
+  if (mg) outerMongoliaGeom = mg.geometry;
+} catch (e) {
+  console.warn('⚠️ 读取 CShapes 失败，外蒙古将缺席：', e.message);
+}
+
 function matchProvinces(keyword) {
+  // '蒙古'（外蒙古）由 CShapes 单独提供；若走省界匹配会误中“内蒙古自治区”
+  if (keyword === '蒙古') return [];
   return prov.features.filter((f) => (f.properties.name || '').includes(keyword));
 }
 
@@ -63,6 +76,18 @@ for (const d of DYNASTIES) {
     // 会被判成“洞”，导致西藏/新疆等整块空白；拆成每省一 feature 可逐省三角化，规避此问题。
     let n = 0;
     for (const kw of d.provinces || []) {
+      if (kw === '蒙古') {
+        // 外蒙古：CShapes 蒙古国几何（元=岭北行省本土 / 清=外蒙古四部）
+        if (outerMongoliaGeom) {
+          out.features.push({
+            type: 'Feature',
+            properties: { ...base, note: '外蒙古' },
+            geometry: { type: outerMongoliaGeom.type, coordinates: roundCoords(outerMongoliaGeom.coordinates) },
+          });
+          n++;
+        }
+        continue;
+      }
       for (const f of matchProvinces(kw)) {
         out.features.push({
           type: 'Feature',

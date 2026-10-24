@@ -564,7 +564,7 @@ function setMode(m) {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
     map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
-    if (panel) panel.showChinaOverview(); // 中国模式：信息框自动切换为“中国介绍”
+    // 中国模式：不自动弹出介绍卡（信息卡已随模式切换关闭），待用户点击某个政权/朝代再打开
   } else {
     currentYear = 1960;
     if (timeline) timeline.setRange(YEAR_MIN, YEAR_MAX, currentYear);
@@ -635,8 +635,24 @@ async function init() {
         if (mode === 'china') {
           // 中国模式：拖动年份时若信息卡打开，则刷新为该年所属朝代
           if (chinaInfoOpen && panel) panel.showChinaInfo(getDynastyAtYear(y));
-        } else if (panel && panel.rerender) {
-          panel.rerender(); // 年份变化→事件板块按"截至当前年份"实时过滤
+        } else if (panel) {
+          // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
+          // 则换成该时段的属性重绘（存续/历时/事件随之更新）；已不存在则清空介绍卡。
+          const props = panel.currentProps ? panel.currentProps() : null;
+          if (props && props.cntry_name) {
+            const t = territories.find(
+              (t) =>
+                currentYear >= t.startYear &&
+                currentYear <= t.endYear &&
+                (props.gwcode != null
+                  ? t.feature.properties.gwcode === props.gwcode
+                  : t.feature.properties.cntry_name === props.cntry_name)
+            );
+            if (t) panel.showInfo(t.feature.properties);
+            else panel.hide();
+          } else if (panel.rerender) {
+            panel.rerender(); // 山脉卡等无政权时间属性，按旧逻辑刷新
+          }
         }
       },
     });
