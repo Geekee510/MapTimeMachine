@@ -73,6 +73,29 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
 #timeline #year-slider { flex: 1; cursor: pointer; }
 #timeline #speed-select { padding: 5px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; }
 #timeline #year-readout { min-width: 46px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* 年份读数可点击：提示可交互 + 激活态高亮 */
+#timeline #year-readout.clickable { cursor: pointer; border-radius: 6px; padding: 2px 6px; transition: background .12s, color .12s; }
+#timeline #year-readout.clickable:hover { background: #eaf1fb; color: #2c6fbb; }
+#timeline #year-readout.world-active { background: #2c6fbb; color: #fff; }
+
+/* 世界大事浮层（点击时间轴年份读数弹出） */
+#world-events {
+  position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%);
+  width: min(440px, 92vw); max-height: 52vh; overflow-y: auto;
+  background: rgba(255,255,255,.97); border-radius: 12px; padding: 14px 18px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.3); z-index: 15; font-size: 13px; line-height: 1.6;
+}
+#world-events.hidden { display: none !important; }
+#world-events .we-head {
+  font-weight: 700; font-size: 15px; color: #1a1a1a; margin-bottom: 10px;
+  border-bottom: 2px solid #2c6fbb; padding-bottom: 6px;
+}
+#world-events .we-list { list-style: none; margin: 0; padding: 0; }
+#world-events .we-list li { margin: 9px 0; padding-left: 12px; border-left: 3px solid #b3541e; }
+#world-events .we-title { font-weight: 700; color: #1a1a1a; }
+#world-events .we-desc { color: #555; font-size: 12px; margin-top: 2px; }
+#world-events .we-empty { color: #888; font-style: italic; }
+#world-events .we-foot { margin-top: 10px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 6px; }
 #timeline #step-back, #timeline #step-fwd { min-width: 34px; padding: 6px 8px; border: none; border-radius: 8px; background: #6c8ebf; color: #fff; cursor: pointer; font-size: 12px; }
 
 .maplibregl-ctrl-attrib { font-size: 10px; }
