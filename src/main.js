@@ -115,6 +115,11 @@ function statusColor(props) {
   return layersState.relief ? [c[0], c[1], c[2], 150] : c;
 }
 
+// 开启地形晕渲时降低填充不透明度（默认 a），让底下山体阴影透出
+function reliefAlpha(a) {
+  return layersState.relief ? 150 : a;
+}
+
 // ---- 地形晕渲（山脉形势图）----
 // 用 Amazon Terrain Tiles 的 terrarium 编码 DEM 做 MapLibre hillshade，
 // 喜马拉雅、安第斯、阿尔卑斯、天山、昆仑等山脉的起伏都能真实呈现
@@ -552,15 +557,29 @@ function buildTerritoryLabelLayer() {
 }
 
 // ---- 中国历代疆域模式图层 ----
+// 并立政权配色（战国七雄 / 三国 / 南北朝 / 五代十国）：
+// 同一朝代内按政权名分配不同色相，避免相邻敌国连成一整块朱红难以分辨。
+const STATE_PALETTE = [
+  [178, 84, 58], [92, 108, 148], [126, 132, 76], [150, 96, 132],
+  [78, 130, 128], [166, 122, 62], [112, 96, 150], [148, 88, 84],
+];
 function buildChinaTerritoryLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d || !chinaDynasties) return null;
   const feats = chinaDynasties.filter((f) => f.properties.id === d.id);
   if (!feats.length) return null;
+  // 各政权分色：同一 feature 集合内按 state 名取色
+  const names = [...new Set(feats.map((f) => f.properties.state).filter(Boolean))];
+  const colorOf = (f) => {
+    if (names.length <= 1) return [178, 84, 58, reliefAlpha(235)]; // 统一王朝：朱红
+    const c = STATE_PALETTE[names.indexOf(f.properties.state) % STATE_PALETTE.length];
+    return [c[0], c[1], c[2], reliefAlpha(235)];
+  };
   return new GeoJsonLayer({
     id: 'china-territory',
     data: { type: 'FeatureCollection', features: feats }, // 战国等多政权并立
-    getFillColor: [178, 84, 58, 235], // 朱红（历史感）
+    getFillColor: (f) => colorOf(f),
+    updateTriggers: { getFillColor: names.join('|') + layersState.relief },
     getLineColor: [80, 30, 20, 230],
     getLineWidth: 1.2,
     lineWidthMinPixels: 0.8,

@@ -262,14 +262,16 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
       lastProps = null; // 朝代卡不参与世界模式的 rerender
       const name = document.getElementById('info-name');
       const body = document.getElementById('info-body');
-      const cap = state ? (d.states?.find((s) => s.name === state)?.capital || state) : d.capital;
+      const st = state ? d.states?.find((s) => s.name === state) : null;
+      const cap = st ? (st.capital || state) : d.capital;
+      const desc = (st && st.desc) || d.desc;
       name.textContent = state
         ? `${state} · ${d.name}（${fy(d.start)} – ${fy(d.end)}）`
         : `${d.name}（${fy(d.start)} – ${fy(d.end)}）`;
       body.innerHTML =
         `<div><span class="k">起止：</span>${fy(d.start)} – ${fy(d.end)}</div>` +
         `<div><span class="k">都城：</span>${cap}</div>` +
-        `<div><span class="k">简介：</span>${d.desc}</div>`;
+        `<div><span class="k">简介：</span>${desc}</div>`;
       info.classList.remove('hidden');
       if (infoEvents) {
         const evs = (d.events || []).slice().sort((a, b) => a.year - b.year);

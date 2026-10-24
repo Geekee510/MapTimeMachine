@@ -53,20 +53,36 @@ const out = { type: 'FeatureCollection', features: [] };
 for (const d of DYNASTIES) {
   const base = { id: d.id, name: d.name, start: d.start, end: d.end, capital: d.capital, capitalCoord: d.capitalCoord, desc: d.desc };
   if (d.states) {
-    // 战国等多政权：每个政权一个 Polygon / MultiPolygon。
-    // bounds 为“环数组”：单环 [ring]=Polygon；多环 [ring1,ring2,…]=MultiPolygon（如南朝带海南、交州飞地）
+    // 多政权并立（战国 / 三国 / 南北朝 / 五代十国）。
+    // 每个政权的疆域有两种写法：
+    //   a) provinces: ['河南','山东',…] —— 按现代省界拼（有省级数据可依时优先，更准）
+    //   b) bounds: [ring] 或 [ring1,ring2,…] —— 手绘简化示意（无省级数据可依时，如战国、南北朝）
     const geomOf = (b) => {
       if (Array.isArray(b) && b.length > 1) return { type: 'MultiPolygon', coordinates: roundCoords(b.map((r) => [r])) };
       return { type: 'Polygon', coordinates: roundCoords(b) };
     };
+    let drawn = 0, listed = 0;
     for (const st of d.states) {
-      out.features.push({
-        type: 'Feature',
-        properties: { ...base, state: st.name, capital: st.capital, capitalCoord: st.capitalCoord },
-        geometry: geomOf(st.bounds),
-      });
+      const stProps = { ...base, state: st.name, capital: st.capital, capitalCoord: st.capitalCoord };
+      if (st.provinces && st.provinces.length) {
+        // a) 省级拼接：每个省独立 feature（规避 deck.gl even-odd 判洞问题）
+        for (const kw of st.provinces) {
+          for (const f of matchProvinces(kw)) {
+            out.features.push({
+              type: 'Feature',
+              properties: stProps,
+              geometry: { type: f.geometry.type, coordinates: roundCoords(f.geometry.coordinates) },
+            });
+            listed++;
+          }
+        }
+      } else if (st.bounds) {
+        // b) 手绘示意
+        out.features.push({ type: 'Feature', properties: stProps, geometry: geomOf(st.bounds) });
+        drawn++;
+      }
     }
-    console.log(`${d.name}\t${d.start}~${d.end}\t${d.states.length} 个政权（手绘示意）`);
+    console.log(`${d.name}\t${d.start}~${d.end}\t${d.states.length} 个政权（${listed} 省要素 + ${drawn} 手绘）`);
   } else if (d.bounds) {
     // 先秦统一王朝：单个手绘 Polygon
     out.features.push({
