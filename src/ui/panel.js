@@ -2,7 +2,7 @@
 // CShapes 真实字段：cntry_name / capname / area / gwcode / gwsyear / gweyear / status
 import { zhCountry, zh, bilingual, RIVER_ZH, MOUNTAIN_ZH } from '../data/i18n.js';
 import { getEvents } from '../data/events.js';
-import { statesAtYear } from '../data/china.js';
+import { statesAtYear, isInterregnum } from '../data/china.js';
 
 // 国旗图片（flag-icons SVG，MIT）：按 CShapes 英文国名 → ISO 3166-1 alpha-2 小写代码。
 // 历史政权去括号后回退到继承国代码。info-name 用 <img> 渲染（Windows 不支持 emoji 旗帜字形）。
@@ -168,15 +168,26 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
       return;
     }
     const enName = props.cntry_name || '未知政权';
-    // 台湾：中国不可分割的一部分，不单独作为“国家”介绍
-    if (enName === 'Taiwan') {
-      name.textContent = '中国台湾';
-      const twFlag = document.createElement('img');
-      twFlag.className = 'flag'; twFlag.src = 'flags/cn.svg'; twFlag.alt = 'cn';
-      name.prepend(twFlag);
+    // 台湾 / 西藏：中国领土不可分割的一部分，不单独作为“国家”介绍。
+    // （CShapes 沿用 COW 体系，把 1946 年后的台湾、1913–1950 年的西藏记为
+    //  independent 独立政权；已在 loaders.js 里并入 China 渲染，这里负责文案。）
+    if (enName === 'Taiwan' || (props.isChinaPart && props.cntry_orig)) {
+      const zone = props.zh_override || (enName === 'Taiwan' ? '中国台湾' : '中国西藏');
+      const jpEra = enName === 'Taiwan' && props.status === 'colony' && props.gweyear <= 1945;
+      name.textContent = zone;
+      const cnFlag = document.createElement('img');
+      cnFlag.className = 'flag'; cnFlag.src = 'flags/cn.svg'; cnFlag.alt = 'cn';
+      name.prepend(cnFlag);
       body.innerHTML =
         `<div><span class="k">归属：</span><span class="status-tag" style="background:#c84646">中国</span></div>` +
-        `<div><span class="k">说明：</span>台湾是中国不可分割的一部分。</div>`;
+        `<div><span class="k">说明：</span>${zone}是中国领土不可分割的一部分，自古以来就是中国的一部分。` +
+        (jpEra
+          ? '1895 年《马关条约》后被日本侵占，1945 年抗战胜利后归还中国。'
+          : '1945 年抗战胜利后，台湾重归中国版图。') +
+        `</div>`;
+      if (!jpEra && props.gwsyear != null) {
+        body.innerHTML += `<div><span class="k">图示区间：</span>${props.gwsyear} – ${props.gweyear >= 2023 ? '今' : props.gweyear}</div>`;
+      }
       info.classList.remove('hidden');
       hideEvents();
       lastProps = null; // 静态卡：不随世界模式年份拖动而刷新
@@ -198,17 +209,33 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     // 非独立政权（殖民地/保护国/托管地/被占领土）：CShapes ruledby=宗主国/占领国 GW 编码
     const RULE_LABEL = { colony: '殖民主国', protectorate: '宗主国', mandate: '托管国', occupied: '占领国' };
     const rows = [];
+    // ⚠️ 两种数据源的"时间"含义完全不同，必须分开显示，否则严重误导：
+    //   · CShapes（1886–2023）：gwsyear~gweyear 是该片疆域的真实有效期；
+    //   · historical-basemaps（1886 年前）：只有"年代快照"年份，
+    //     **不是**政权存续时间（把 1279 年的元显示成"存续 1279–1299 / 历时 20 年"是错的）。
     const start = props.gwsyear != null ? props.gwsyear : null;
     const end = props.gweyear != null ? props.gweyear : null;
-    const ongoing = end == null || end >= 2023;
-    const endLabel = ongoing ? '今' : end;
-    rows.push(
-      `<div><span class="k">存续：</span>${start != null ? start : '?'} – ${endLabel}</div>`
-    );
-    if (start != null) {
-      const calcEnd = ongoing ? (viewYear || 2023) : end;
-      const dur = Math.max(0, calcEnd - start);
-      rows.push(`<div><span class="k">历时：</span>约 ${dur} 年${ongoing ? '（延续中）' : ''}</div>`);
+    if (props.isSnapshot) {
+      const y = props.snapYear, e = props.snapEnd;
+      rows.push(
+        `<div><span class="k">本图年代：</span>${y != null ? y : '?'}` +
+          `${e != null && e > y ? `（此图表示该年疆域，适用至 ${e} 年前）` : ''}</div>`
+      );
+      rows.push(
+        `<div style="color:#8a6a4a;font-size:12px">年代快照：仅表示该年疆域，政权存续起止请以史料为准</div>`
+      );
+    } else if (start != null) {
+      const ongoing = end == null || end >= 2023;
+      if (end != null && end === start) {
+        // 年内切片：如美国 1959-01-02 ~ 1959-08-19（阿拉斯加建州后、夏威夷建州前）
+        rows.push(`<div><span class="k">存续：</span>${start} 年内（疆域变更过渡片，不足 1 年）</div>`);
+      } else {
+        const endLabel = ongoing ? '今' : end;
+        rows.push(`<div><span class="k">存续：</span>${start} – ${endLabel}</div>`);
+        const calcEnd = ongoing ? Math.min(viewYear || 2023, 2023) : end;
+        const dur = Math.max(0, calcEnd - start);
+        rows.push(`<div><span class="k">历时：</span>约 ${dur} 年${ongoing ? '（延续中）' : ''}</div>`);
+      }
     }
     if (viewYear) rows.push(`<div><span class="k">当前视图年份：</span>${viewYear}</div>`);
     rows.push(
@@ -221,7 +248,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
       if (props.subjecto) {
         rulerZh = zhCountry(props.subjecto) || props.subjecto;
       } else if (typeof rulerName === 'function') {
-        const rulerEn = rulerName(props.ruledby, props.gwsyear ?? viewYear ?? 2023);
+        const rulerEn = rulerName(props.ruledby, props.gwsyear ?? props.snapYear ?? viewYear ?? 2023);
         if (rulerEn) rulerZh = zhCountry(rulerEn) || rulerEn; // 俄罗斯（苏联）/ 德国（普鲁士）等历史别名均可译出
       }
       if (rulerZh) {
@@ -272,8 +299,13 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
       name.textContent = state
         ? `${state} · ${d.name}（${span}）`
         : `${d.name}（${span}）`;
+      // 空档年（如楚汉相争 -205~-203、王莽新朝 9~24）：图示沿用前朝疆域，需明确提示
+      const interregnum = year != null && isInterregnum(year);
       body.innerHTML =
         `<div><span class="k">起止：</span>${span}</div>` +
+        (interregnum
+          ? `<div style="color:#8a6a4a;font-size:12px">⚠️ ${year} 年处于王朝更替过渡期（无独立王朝数据），图示沿用${d.name}疆域</div>`
+          : '') +
         `<div><span class="k">都城：</span>${cap}</div>` +
         `<div><span class="k">简介：</span>${desc}</div>`;
       info.classList.remove('hidden');

@@ -160,10 +160,36 @@ function applyRelief() {
   }
 }
 
+// 给定年份，返回该年**应当渲染**的疆域要素。
+// ⚠️ 不能简单用 start<=y<=end 全量过滤：CShapes 同一国家在同一年可能有多片
+// （年内多次疆域变更，如美国 1959 年 1 月阿拉斯加建州、8 月夏威夷建州，
+//  被切成 [1886~1959] / [1959~1959] / [1959~2023] 三片，起始日各不相同）。
+// 全量校验：710 个要素里共 395 个"国-年"存在这种年内切片（单年最多 7 片）。
+// 三片全画会填充叠色、边界重影、点选命中错层；
+// 故同一国家只保留 **起始日期最晚** 的一片（= 该年的最终疆域状态）。
+// 已验证不存在"同国同年且起始日相同"的并列领土，所以这样不会丢领土。
+function territoriesAtYear(year) {
+  const latest = new Map(); // gwcode -> territory（该年最新的那一片）
+  const out = [];
+  for (const t of territories) {
+    if (year < t.startYear || year > t.endYear) continue;
+    const code = t.props.gwcode ?? t.props.cntry_name;
+    const prev = latest.get(code);
+    if (!prev) {
+      latest.set(code, t);
+      out.push(t);
+      continue;
+    }
+    if (t.startKey >= prev.startKey) {
+      out[out.indexOf(prev)] = t; // 用更晚的一片替换
+      latest.set(code, t);
+    }
+  }
+  return out;
+}
+
 function buildTerritoryLayer() {
-  const active = territories
-    .filter((t) => currentYear >= t.startYear && currentYear <= t.endYear)
-    .map((t) => t.feature);
+  const active = territoriesAtYear(currentYear).map((t) => t.feature);
   return new GeoJsonLayer({
     id: 'territory',
     data: { type: 'FeatureCollection', features: active },
@@ -249,9 +275,14 @@ async function ensureHb(year) {
           // 有宗主国（SUBJECTO 不同于自身）视为属地/殖民地，否则为独立政权
           status: p.SUBJECTO && p.SUBJECTO !== p.NAME ? 'colony' : 'independent',
           borderPrecision: p.BORDERPRECISION ?? null,
-          gwsyear: year,
-          gweyear: endYear,
+          // ⚠️ 这里刻意**不写** gwsyear/gweyear：
+          // historical-basemaps 是"某一年份的世界快照"，year~endYear 只是这张快照的
+          // 适用区间（到下一张快照前），**不是该政权的存续时间**。
+          // 写进 gwsyear/gweyear 会让信息卡把"唐朝"显示成"存续 1279 – 1299（历时 20 年）"。
+          // 故改用 snapYear/snapEnd，信息卡只显示"本图年代快照"。
           snapYear: year,
+          snapEnd: endYear,
+          isSnapshot: true,
         },
         geometry: f.geometry,
       };
@@ -523,18 +554,19 @@ function buildGwcodeIndex() {
     arr.push({ startYear: t.startYear, endYear: t.endYear, name: p.cntry_name });
   }
 }
-// 给定统治国 GW 编码与年份，返回当时的国名（优先同年，否则取时间最近的一片）
+// 给定统治国 GW 编码与年份，返回当时的国名。
+// 优先取区间包含该年的一片；没有则取"时间上离该年最近"的一片
+// （距离按整段区间算：在区间外时才计距离，比只比 startYear 更准，
+//  例如查 1910 年的宗主国，应命中 [1886~1918] 而非更早的 [1886~1900]）。
 function rulerName(gwcode, year) {
   if (gwcode == null) return null;
   if (SPECIAL_RULERS[gwcode]) return SPECIAL_RULERS[gwcode];
   const arr = gwcodeIndex.get(gwcode);
   if (!arr || !arr.length) return null;
+  const dist = (a) => (year < a.startYear ? a.startYear - year : year > a.endYear ? year - a.endYear : 0);
   const hit =
     arr.find((a) => year >= a.startYear && year <= a.endYear) ||
-    arr.reduce((best, a) => {
-      if (!best) return a;
-      return Math.abs(a.startYear - year) < Math.abs(best.startYear - year) ? a : best;
-    }, null);
+    arr.reduce((best, a) => (!best || dist(a) < dist(best) ? a : best), null);
   return hit ? hit.name : null;
 }
 
@@ -612,8 +644,7 @@ function buildTerritoryLabelLayer() {
   // 同名去重：CShapes 中同一国家同年可能由多个要素（多块领土）组成，
   // 每块各出一个标签会重复；按国名合并，只保留最大那块的标签。
   const byName = new Map();
-  for (const t of territories) {
-    if (currentYear < t.startYear || currentYear > t.endYear) continue;
+  for (const t of territoriesAtYear(currentYear)) {
     if (!t.meta || !t.meta.c || t.meta.d < minDiag) continue;
     const name = zhCountry(t.feature.properties.cntry_name) || t.feature.properties.cntry_name;
     const prev = byName.get(name);
@@ -1075,13 +1106,12 @@ async function init() {
             if (hit) panel.showInfo(hit.properties);
             else panel.hide();
           } else if (props && props.cntry_name) {
-            const t = territories.find(
-              (t) =>
-                currentYear >= t.startYear &&
-                currentYear <= t.endYear &&
-                (props.gwcode != null
-                  ? t.feature.properties.gwcode === props.gwcode
-                  : t.feature.properties.cntry_name === props.cntry_name)
+            // 注意：必须走 territoriesAtYear（同一国家同年可能有多片年内切片，
+            // 用 territories.find 随手取一片会拿到过期的旧疆域/旧属性）
+            const t = territoriesAtYear(currentYear).find((t) =>
+              props.gwcode != null
+                ? t.feature.properties.gwcode === props.gwcode
+                : t.feature.properties.cntry_name === props.cntry_name
             );
             if (t) panel.showInfo(t.feature.properties);
             else panel.hide();

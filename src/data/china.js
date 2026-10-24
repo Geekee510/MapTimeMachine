@@ -476,12 +476,38 @@ for (const d of DYNASTIES) {
   for (const p of EXTRA_PROVINCES[d.id] || []) if (!d.provinces.includes(p)) d.provinces.push(p);
 }
 
-// 给定年份，返回该年对应的主线朝代（找不到返回 null）。
+// 给定年份，返回该年对应的主线朝代。
+// ⚠️ 两点历史数据的坑，都会让"拖动年份看到错的朝代"：
+//   1) 朝代区间是**首尾相接**的（东汉 25~220、三国 220~280），交界年同时命中两个。
+//      旧实现取"第一个"命中的 → 220 年显示东汉、960 年显示后周、1127 年显示北宋，
+//      全都差一年。改取**最后一个**命中的（= 交界年归新朝：220 年曹丕已代汉、
+//      960 年陈桥兵变、1127 年南宋建立），与政权更替史实一致。
+//      （少数朝代本身在历史上就重叠，如三国 220~280 与西晋 266~316，
+//        取后者即 266 年起显示西晋，符合"曹魏已亡、晋已代魏"的主线。）
+//   2) 存在空档年：秦 -221~-206 与西汉 -202~8 之间是楚汉相争（-205~-203），
+//      东汉 25~220 之前 9~24 是王莽新朝。旧实现返回 null → 拖到这些年中国地图全空白。
+//      改为沿用**结束年最近的前一个朝代**，并在 returned 上打 fallback 标记，
+//      由信息卡标注"过渡期，图示沿用前朝疆域"。
 export function getDynastyAtYear(year) {
+  let hit = null;
   for (const d of DYNASTIES) {
-    if (year >= d.start && year <= d.end) return d;
+    if (year >= d.start && year <= d.end) hit = d; // 取最后一个命中者（交界年归新朝）
   }
-  return null;
+  if (hit) return hit;
+  // 空档年（楚汉相争 -205~-203、新朝 9~24 等）：沿用时间最近的前一个朝代
+  let prev = null;
+  for (const d of DYNASTIES) {
+    if (d.end < year && (!prev || d.end > prev.end)) prev = d;
+  }
+  return prev;
+}
+
+// 该年份是否处于王朝更替的空档/过渡期（图示沿用前朝疆域，需提示用户）
+export function isInterregnum(year) {
+  for (const d of DYNASTIES) {
+    if (year >= d.start && year <= d.end) return false;
+  }
+  return true;
 }
 
 // 取某一年份下该朝代实际并立的政权。
