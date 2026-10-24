@@ -53,12 +53,17 @@ const out = { type: 'FeatureCollection', features: [] };
 for (const d of DYNASTIES) {
   const base = { id: d.id, name: d.name, start: d.start, end: d.end, capital: d.capital, capitalCoord: d.capitalCoord, desc: d.desc };
   if (d.states) {
-    // 战国等多政权：每个政权一个 Polygon
+    // 战国等多政权：每个政权一个 Polygon / MultiPolygon。
+    // bounds 为“环数组”：单环 [ring]=Polygon；多环 [ring1,ring2,…]=MultiPolygon（如南朝带海南、交州飞地）
+    const geomOf = (b) => {
+      if (Array.isArray(b) && b.length > 1) return { type: 'MultiPolygon', coordinates: roundCoords(b.map((r) => [r])) };
+      return { type: 'Polygon', coordinates: roundCoords(b) };
+    };
     for (const st of d.states) {
       out.features.push({
         type: 'Feature',
         properties: { ...base, state: st.name, capital: st.capital, capitalCoord: st.capitalCoord },
-        geometry: { type: 'Polygon', coordinates: roundCoords(st.bounds) },
+        geometry: geomOf(st.bounds),
       });
     }
     console.log(`${d.name}\t${d.start}~${d.end}\t${d.states.length} 个政权（手绘示意）`);
