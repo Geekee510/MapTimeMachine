@@ -26,8 +26,41 @@ const FLAGS = {
   'Canada': 'ca', 'Australia': 'au', 'New Zealand': 'nz', 'South Africa': 'za',
   'Nigeria': 'ng', 'Kenya': 'ke', 'Ethiopia': 'et', 'Morocco': 'ma',
   'Algeria': 'dz', 'Libya': 'ly', 'Sudan': 'sd', 'Ghana': 'gh',
+  // —— 现存主权国家补充 ——
+  'Albania': 'al', 'Angola': 'ao', 'Armenia': 'am', 'Azerbaijan': 'az',
+  'Bahamas': 'bs', 'Bahrain': 'bh', 'Barbados': 'bb', 'Belarus': 'by',
+  'Belize': 'bz', 'Benin': 'bj', 'Bhutan': 'bt', 'Bosnia-Herzegovina': 'ba',
+  'Bosnia': 'ba', 'Herzegovina': 'ba', 'Botswana': 'bw', 'Brunei': 'bn',
+  'Bulgaria': 'bg', 'Burkina Faso': 'bf', 'Burundi': 'bi', 'Cambodia': 'kh',
+  'Cameroon': 'cm', 'Cape Verde': 'cv', 'Central African Republic': 'cf',
+  'Chad': 'td', 'Comoros': 'km', 'Congo': 'cg', 'Congo, Democratic Republic of': 'cd',
+  "Cote D'Ivoire": 'ci', 'Costa Rica': 'cr', 'Croatia': 'hr', 'Cyprus': 'cy',
+  'Djibouti': 'dj', 'Dominican Republic': 'do', 'East Timor': 'tl', 'Ecuador': 'ec',
+  'El Salvador': 'sv', 'Equatorial Guinea': 'gq', 'Eritrea': 'er', 'Estonia': 'ee',
+  'Fiji': 'fj', 'Gabon': 'ga', 'Gambia': 'gm', 'Georgia': 'ge', 'Guatemala': 'gt',
+  'Guinea': 'gn', 'Guinea-Bissau': 'gw', 'Guyana': 'gy', 'Haiti': 'ht',
+  'Honduras': 'hn', 'Jamaica': 'jm', 'Jordan': 'jo', 'Kosovo': 'xk', 'Kuwait': 'kw',
+  'Kyrgyz Republic': 'kg', 'Laos': 'la', 'Latvia': 'lv', 'Lebanon': 'lb',
+  'Lesotho': 'ls', 'Liberia': 'lr', 'Lithuania': 'lt', 'Luxembourg': 'lu',
+  'Macedonia': 'mk', 'Madagascar': 'mg', 'Malawi': 'mw', 'Maldives': 'mv',
+  'Mali': 'ml', 'Malta': 'mt', 'Mauritania': 'mr', 'Mauritius': 'mu',
+  'Moldova': 'md', 'Montenegro': 'me', 'Mozambique': 'mz', 'Namibia': 'na',
+  'Nicaragua': 'ni', 'Niger': 'ne', 'Oman': 'om', 'Panama': 'pa',
+  'Papua New Guinea': 'pg', 'Paraguay': 'py', 'Puerto Rico': 'pr', 'Qatar': 'qa',
+  'Rwanda': 'rw', 'Senegal': 'sn', 'Serbia': 'rs', 'Sierra Leone': 'sl',
+  'Singapore': 'sg', 'Slovakia': 'sk', 'Slovenia': 'si', 'Solomon Islands': 'sb',
+  'Somalia': 'so', 'South Sudan': 'ss', 'Surinam': 'sr', 'Swaziland': 'sz',
+  'Tajikistan': 'tj', 'Tanzania': 'tz', 'Togo': 'tg', 'Trinidad and Tobago': 'tt',
+  'Tunisia': 'tn', 'Turkmenistan': 'tm', 'Uganda': 'ug', 'United Arab Emirates': 'ae',
+  'Uruguay': 'uy', 'Uzbekistan': 'uz', 'Yemen': 'ye', 'Zambia': 'zm', 'Zimbabwe': 'zw',
+  "Korea, People's Republic of": 'kp', 'Vietnam, Democratic Republic of': 'vn', 'Vietnam, Republic of': 'vn',
+  // —— 海外属地 / 特殊地区补充 ——
+  'German Federal Republic': 'de', 'Rumania': 'ro', "Yemen, People's Republic of": 'ye',
+  'Palestine': 'ps', 'Gaza': 'ps', 'West Bank': 'ps',
+  'New Caledonia and Dependencies': 'nc', 'French Polynesia': 'pf', 'Guadeloupe': 'gp',
+  'Martinique': 'mq', 'Reunion': 're', 'French Guyana': 'gf', 'Papua': 'pg',
 };
-function flagOf(enName) {
+export function flagOf(enName) {
   if (!enName) return '';
   if (FLAGS[enName]) return FLAGS[enName];
   const base = String(enName).replace(/\s*\([^)]*\)\s*$/, '').trim(); // 去括号后缀
@@ -127,6 +160,20 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
       return;
     }
     const enName = props.cntry_name || '未知政权';
+    // 台湾：中国不可分割的一部分，不单独作为“国家”介绍
+    if (enName === 'Taiwan') {
+      name.textContent = '中国台湾';
+      const twFlag = document.createElement('img');
+      twFlag.className = 'flag'; twFlag.src = 'flags/cn.svg'; twFlag.alt = 'cn';
+      name.prepend(twFlag);
+      body.innerHTML =
+        `<div><span class="k">归属：</span><span class="status-tag" style="background:#c84646">中国台湾</span></div>` +
+        `<div><span class="k">说明：</span>台湾是中国不可分割的一部分。</div>`;
+      info.classList.remove('hidden');
+      hideEvents();
+      if (onShowInfo) onShowInfo(props);
+      return;
+    }
     const cnName = zhCountry(enName);
     const flag = flagOf(enName);
     name.textContent = bilingual(cnName, enName);

@@ -223,6 +223,31 @@ export const DYNASTIES = [
   },
 ];
 
+// 版图补全：补入青海 / 宁夏 / 海南 / 西藏 / 新疆（此前遗漏，导致这些省份在地图上一直空缺）
+// 均为示意性近似边界。依据：西汉置西海郡（今青海湖一带）、珠崖/儋耳郡（海南）；东汉和帝复置西海郡；
+// 三国孙吴据珠崖、曹魏有朔方（宁夏北部）；西晋置西域长史府（楼兰）；隋置西海郡、鄯善/且末郡；
+// 北宋灵州（今宁夏）—后没于西夏；明设乌斯藏都司（西藏，羁縻）。
+const EXTRA_PROVINCES = {
+  'west-han': ['青海', '海南'],        // 西海郡 / 珠崖·儋耳郡
+  'east-han': ['青海'],                // 西海郡（永元年间复置）
+  'three-kingdoms': ['宁夏', '海南'],  // 曹魏朔方 / 孙吴珠崖
+  'west-jin': ['宁夏', '新疆'],        // 前凉朔方 / 西域长史府
+  'east-jin': ['宁夏'],                // 北凉/北魏灵武
+  'nan-bei-chao': ['宁夏', '新疆'],    // 北魏灵州 / 高昌·西域校尉
+  sui: ['青海', '宁夏', '新疆'],       // 西海郡 / 灵武 / 鄯善·且末郡
+  'five-dynasties': ['宁夏'],          // 朔方节度使（灵州）
+  'north-song': ['宁夏'],              // 灵州—后没于西夏
+  'south-song': ['宁夏'],              // 西夏（宁夏）
+  tang: ['青海', '宁夏', '海南'],
+  yuan: ['青海', '宁夏', '海南'],
+  ming: ['青海', '宁夏', '海南', '西藏'], // 乌斯藏都司（羁縻）
+  qing: ['青海', '宁夏', '海南'],
+};
+for (const d of DYNASTIES) {
+  if (d.states || !d.provinces) continue; // 先秦/战国用 bounds/states，无 provinces
+  for (const p of EXTRA_PROVINCES[d.id] || []) if (!d.provinces.includes(p)) d.provinces.push(p);
+}
+
 // 给定年份，返回该年对应的主线朝代（找不到返回 null）。
 export function getDynastyAtYear(year) {
   for (const d of DYNASTIES) {

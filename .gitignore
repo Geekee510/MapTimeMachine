@@ -6,6 +6,10 @@ dist/
 # 本地工作流 / 缓存（非项目交付物）
 .workbuddy/
 
+# 第三方整包下载残留（仅保留抽取到 public/flags/ 的 SVG）
+flag-icons-main/
+*.tgz
+
 # 数据文件（public/data/*.geojson）现已随仓库提交，便于一键部署与克隆即运行。
 # 如需重新生成 Natural Earth 数据，可运行 npm run fetch-data（CShapes 2.1 已随仓库提供）。
 

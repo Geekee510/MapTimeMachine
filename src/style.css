@@ -25,7 +25,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
 }
 #info.hidden { display: none; }
 #info h3 { font-size: 15px; margin-bottom: 8px; color: #1a1a1a; padding-right: 18px; }
-#info-name .flag { height: 15px; width: auto; margin-right: 6px; vertical-align: -3px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+#info-name .flag { display: block; height: 26px; width: auto; margin: 0 0 6px 0; border-radius: 3px; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
 #info-close { position: absolute; top: 8px; right: 10px; border: none; background: none; font-size: 18px; cursor: pointer; color: #888; }
 #info-body div { margin: 2px 0; }
 #info-body .k { color: #666; }
