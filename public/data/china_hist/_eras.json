@@ -1,0 +1,293 @@
+{
+ "id": "eras-china",
+ "type": "era-table",
+ "description": "中国主线朝代表：用于把精确年份映射为界面上的朝代标签（年份在界面弱化呈现）。并存政权（辽金等）在档案 affiliations 中如实记录，不在此表展开。",
+ "source": [
+  {
+   "title": "通用历史年表（朝代起讫为学界通说）",
+   "url": null,
+   "license": "公版事实"
+  }
+ ],
+ "eras": [
+  {
+   "label": {
+    "zh": "西周",
+    "en": "Western Zhou"
+   },
+   "from": -1046,
+   "to": -771,
+   "geo": {
+    "china": null,
+    "world": null,
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "春秋",
+    "en": "Spring & Autumn"
+   },
+   "from": -770,
+   "to": -476,
+   "geo": {
+    "china": null,
+    "world": null,
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "战国",
+    "en": "Warring States"
+   },
+   "from": -475,
+   "to": -222,
+   "geo": {
+    "china": null,
+    "world": null,
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "秦",
+    "en": "Qin"
+   },
+   "from": -221,
+   "to": -207,
+   "geo": {
+    "china": "qin",
+    "world": "world_bc100",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "西汉",
+    "en": "Western Han"
+   },
+   "from": -202,
+   "to": 8,
+   "geo": {
+    "china": "han_w",
+    "world": "world_bc1",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "新莽",
+    "en": "Xin (Wang Mang)"
+   },
+   "from": 9,
+   "to": 23,
+   "geo": {
+    "china": "han_w",
+    "world": "world_bc1",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "东汉",
+    "en": "Eastern Han"
+   },
+   "from": 25,
+   "to": 220,
+   "geo": {
+    "china": "han_e",
+    "world": "world_100",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "三国",
+    "en": "Three Kingdoms"
+   },
+   "from": 220,
+   "to": 280,
+   "geo": {
+    "china": "three_k",
+    "world": "world_200",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "西晋",
+    "en": "Western Jin"
+   },
+   "from": 266,
+   "to": 316,
+   "geo": {
+    "china": "jin_w",
+    "world": "world_300",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "东晋十六国",
+    "en": "Eastern Jin & Sixteen Kingdoms"
+   },
+   "from": 317,
+   "to": 420,
+   "geo": {
+    "china": null,
+    "world": "world_500",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "南北朝",
+    "en": "Northern & Southern Dynasties"
+   },
+   "from": 420,
+   "to": 589,
+   "geo": {
+    "china": "south_n",
+    "world": "world_500",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "隋",
+    "en": "Sui"
+   },
+   "from": 581,
+   "to": 618,
+   "geo": {
+    "china": "sui",
+    "world": "world_600",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "唐",
+    "en": "Tang"
+   },
+   "from": 618,
+   "to": 907,
+   "geo": {
+    "china": "tang",
+    "world": "world_700",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "五代十国",
+    "en": "Five Dynasties & Ten Kingdoms"
+   },
+   "from": 907,
+   "to": 979,
+   "geo": {
+    "china": "five_d",
+    "world": "world_900",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "北宋 (辽·西夏)",
+    "en": "Northern Song (Liao / W. Xia)"
+   },
+   "from": 960,
+   "to": 1127,
+   "geo": {
+    "china": "song_liao",
+    "world": "world_1000",
+    "extras": [
+     "xixia"
+    ]
+   }
+  },
+  {
+   "label": {
+    "zh": "南宋 (金)",
+    "en": "Southern Song (Jin)"
+   },
+   "from": 1127,
+   "to": 1279,
+   "geo": {
+    "china": "song_jin",
+    "world": "world_1200",
+    "extras": [
+     "xixia_1200",
+     "mongol"
+    ]
+   }
+  },
+  {
+   "label": {
+    "zh": "元",
+    "en": "Yuan"
+   },
+   "from": 1271,
+   "to": 1368,
+   "geo": {
+    "china": "yuan",
+    "world": "world_1279",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "明",
+    "en": "Ming"
+   },
+   "from": 1368,
+   "to": 1644,
+   "geo": {
+    "china": "ming",
+    "world": "world_1492",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "清",
+    "en": "Qing"
+   },
+   "from": 1644,
+   "to": 1912,
+   "geo": {
+    "china": "qing",
+    "world": "world_1700",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "中华民国",
+    "en": "Republic of China"
+   },
+   "from": 1912,
+   "to": 1949,
+   "geo": {
+    "china": "republic",
+    "world": "world_1930",
+    "extras": []
+   }
+  },
+  {
+   "label": {
+    "zh": "中华人民共和国",
+    "en": "People's Republic of China"
+   },
+   "from": 1949,
+   "to": null,
+   "geo": {
+    "china": "prc",
+    "world": "world_modern",
+    "extras": []
+   }
+  }
+ ],
+ "geo_note": "geo.china: CHGIS 政区图层文件名（data/geo/{key}.json）；geo.world: historical-basemaps 世界断面；extras: 并存政权补充图层。先秦三代暂无矢量图层。"
+}

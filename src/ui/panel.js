@@ -71,6 +71,7 @@ export function flagOf(enName) {
 
 export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tTerritory = document.getElementById('toggle-territory');
+  const tRegion = document.getElementById('toggle-region');
   const tRiver = document.getElementById('toggle-river');
   const tMountain = document.getElementById('toggle-mountain');
   const tLake = document.getElementById('toggle-lake');
@@ -84,6 +85,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   let lastProps = null; // 当前展示的对象（国家 or 山脉），用于年份/语言变化时刷新
 
   tTerritory.addEventListener('change', () => onToggleLayer('territory', tTerritory.checked));
+  tRegion?.addEventListener('change', () => onToggleLayer('region', tRegion.checked));
   tRiver.addEventListener('change', () => onToggleLayer('river', tRiver.checked));
   tMountain.addEventListener('change', () => onToggleLayer('mountain', tMountain.checked));
   tLake.addEventListener('change', () => onToggleLayer('lake', tLake.checked));
@@ -282,6 +284,25 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
           hideEvents();
         }
       }
+    },
+    // 中国历代疆域模式：点击某个历史政区（州/郡/府/路）时的详情卡
+    showChinaRegion(props, d) {
+      if (!props) return;
+      const fy = (y) => (y < 0 ? `前${-y}` : `${y}`);
+      lastProps = null; // 政区卡不参与世界模式的 rerender
+      const name = document.getElementById('info-name');
+      const body = document.getElementById('info-body');
+      name.textContent = `${props.name}${props.type ? `（${props.type}）` : ''}`;
+      body.innerHTML =
+        `<div><span class="k">所属朝代：</span>${props.dynastyName || (d ? d.name : '—')}` +
+        (d ? `（${fy(d.start)} – ${fy(d.end)}）` : '') +
+        `</div>` +
+        `<div><span class="k">政区类型：</span><span class="status-tag" style="background:#8a6d3b">${props.type || '政区'}</span></div>` +
+        `<div><span class="k">设置年代：</span>${fy(props.beg)} – ${fy(props.end)}</div>` +
+        (props.namePy ? `<div><span class="k">罗马字：</span>${props.namePy}</div>` : '') +
+        `<div><span class="k">数据来源：</span>CHGIS 历史政区（示意精度）</div>`;
+      info.classList.remove('hidden');
+      hideEvents(); // 政区层面暂无独立大事表
     },
     // 年份或中英文切换后，刷新当前打开的卡片（简介 + 事件板块同步）
     rerender() {

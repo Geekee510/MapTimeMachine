@@ -13,7 +13,7 @@ import { createPanel } from './ui/panel.js';
 const YEAR_MIN = 1886;
 const YEAR_MAX = 2023;
 const CHINA_MIN = -2070;
-const CHINA_MAX = 1912;
+const CHINA_MAX = 2023; // 含中华民国(1912–1949)与中华人民共和国(1949– )
 const WORLD_CENTER = [12, 28];
 const WORLD_ZOOM = 1.4;
 const CHINA_CENTER = [104, 36]; // 中国大致中心（华北/中原一带）
@@ -28,10 +28,12 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, river: true, mountain: true, lake: false, basemapLand: false };
+const layersState = { territory: true, region: true, river: true, mountain: true, lake: false, basemapLand: false };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
-let chinaDynasties = null; // china_dynasties.geojson 的 features 数组
+let chinaDynasties = null; // china_dynasties.geojson 的 features 数组（省界拼接的疆域底图）
+let chinaOutlines = null; // china_outline.geojson：historical-basemaps 提取的王朝疆域轮廓（更接近史实）
+let chinaRegions = null; // china_regions.geojson：CHGIS 历代政区界（州/郡/府/路），叠在疆域之上
 let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
 
 // 底图陆地显隐：CShapes 疆域数据不含小岛屿，底图(demotiles)却会画出
@@ -401,6 +403,63 @@ function buildChinaTerritoryLayer() {
   });
 }
 
+// 王朝疆域轮廓层：优先于省界拼接（形状按历史疆域绘制，更接近史实）。
+// 每个朝代可能有多个年代的轮廓（如清有 1700/1783/1800），取年份最接近当前年份的那个。
+function buildChinaOutlineLayer() {
+  const d = getDynastyAtYear(currentYear);
+  if (!d || !chinaOutlines || !chinaOutlines.length) return null;
+  const cands = chinaOutlines.filter((f) => f.properties.dynasty === d.id);
+  if (!cands.length) return null;
+  const best = cands.reduce((a, b) =>
+    Math.abs(b.properties.year - currentYear) < Math.abs(a.properties.year - currentYear) ? b : a
+  );
+  return new GeoJsonLayer({
+    id: 'china-outline',
+    data: { type: 'FeatureCollection', features: [best] },
+    getFillColor: [178, 84, 58, 235], // 朱红（与省界拼接底图同色）
+    getLineColor: [90, 30, 18, 240],
+    getLineWidth: 1.6,
+    lineWidthMinPixels: 1,
+    stroked: true,
+    filled: true,
+    pickable: true,
+    autoHighlight: true,
+    highlightColor: [255, 255, 255, 60],
+    onClick: (info) => {
+      chinaInfoOpen = true;
+      if (panel) panel.showChinaInfo(d, info.object?.properties?.state);
+    },
+  });
+}
+
+// 历代政区界层：CHGIS 州/郡/府/路，只描边不填充，叠在疆域轮廓之上
+// （谭其骧《中国历史地图集》式呈现：疆域范围 + 内部政区界）
+function buildChinaRegionLayer() {
+  const d = getDynastyAtYear(currentYear);
+  if (!d || !chinaRegions || !chinaRegions.length) return null;
+  let feats = chinaRegions.filter(
+    (f) => f.properties.dynasty === d.id && currentYear >= f.properties.beg && currentYear <= f.properties.end
+  );
+  // 兜底：某些朝代的政区年份区间覆盖不全（如唐末），过滤后过少则显示该朝代全部政区
+  if (feats.length < 3) feats = chinaRegions.filter((f) => f.properties.dynasty === d.id);
+  if (!feats.length) return null;
+  return new GeoJsonLayer({
+    id: 'china-regions',
+    data: { type: 'FeatureCollection', features: feats },
+    stroked: true,
+    filled: false, // 只画界线，避免与疆域填充叠色
+    getLineColor: [110, 60, 35, 170],
+    getLineWidth: 0.8,
+    lineWidthMinPixels: 0.5,
+    pickable: true,
+    onClick: (info) => {
+      if (!info.object || !panel) return;
+      chinaInfoOpen = true;
+      panel.showChinaRegion(info.object.properties, d);
+    },
+  });
+}
+
 function buildChinaCapitalLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d) return [];
@@ -452,9 +511,19 @@ function updateLayers() {
   if (mode === 'china') {
     // 中国历代疆域：朝代疆域 + 都城，河流/山脉/湖泊作背景（按面板开关）
     if (layersState.territory) {
-      const t = buildChinaTerritoryLayer();
-      if (t) layers.push(t);
+      // 疆域填充：优先用 historical-basemaps 的王朝轮廓（更接近史实），
+      // 无轮廓的朝代（秦/三国/两晋/南北朝/隋/五代/南宋/民国）回落省界拼接底图
+      const ol = buildChinaOutlineLayer();
+      if (ol) layers.push(ol);
+      else {
+        const t = buildChinaTerritoryLayer();
+        if (t) layers.push(t);
+      }
       layers.push(...buildChinaCapitalLayer());
+    }
+    if (layersState.region) {
+      const rg = buildChinaRegionLayer();
+      if (rg) layers.push(rg);
     }
     if (layersState.river && rivers) layers.push(...buildRiverLayer());
     if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
@@ -564,6 +633,38 @@ async function loadChina() {
     }
   } catch (e) {
     console.warn('[china] 加载失败（可选）：', e.message);
+  }
+}
+
+// 中国历代疆域轮廓：来自 historical-basemaps（按历史疆域绘制，含西域等边疆）
+async function loadChinaOutline() {
+  try {
+    const res = await fetch('./data/china_outline.geojson');
+    if (res.ok) {
+      const gj = await res.json();
+      chinaOutlines = gj.features || [];
+      console.info(`[china] 已加载 ${chinaOutlines.length} 个王朝疆域轮廓`);
+    } else {
+      console.warn('[china] 未找到 china_outline.geojson（可运行 node scripts/gen-china-outline.mjs 生成）');
+    }
+  } catch (e) {
+    console.warn('[china] 轮廓加载失败（可选）：', e.message);
+  }
+}
+
+// 中国历代政区界：CHGIS 政区（州/郡/府/路…），按 beg/end 逐年过滤
+async function loadChinaRegions() {
+  try {
+    const res = await fetch('./data/china_regions.geojson');
+    if (res.ok) {
+      const gj = await res.json();
+      chinaRegions = gj.features || [];
+      console.info(`[china] 已加载 ${chinaRegions.length} 个历史政区要素`);
+    } else {
+      console.warn('[china] 未找到 china_regions.geojson（可运行 node scripts/gen-china-regions.mjs 生成）');
+    }
+  } catch (e) {
+    console.warn('[china] 政区加载失败（可选）：', e.message);
   }
 }
 
@@ -707,7 +808,10 @@ async function init() {
     // 世界/中国模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));
-    loadChina().then(() => { if (mode === 'china') updateLayers(); }); // 后台加载中国疆域
+    // 后台加载中国疆域：底图 + 王朝轮廓 + 历代政区
+    Promise.all([loadChina(), loadChinaOutline(), loadChinaRegions()]).then(() => {
+      if (mode === 'china') updateLayers();
+    });
     updateYearLabel();
     updateLayers();
 

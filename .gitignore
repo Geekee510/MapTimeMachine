@@ -10,6 +10,10 @@ dist/
 flag-icons-main/
 *.tgz
 
+# 生成脚本的下载缓存（原始数据已抽取进 public/data/）
+.tmp-hb/
+.tmp-chm/
+
 # 数据文件（public/data/*.geojson）现已随仓库提交，便于一键部署与克隆即运行。
 # 如需重新生成 Natural Earth 数据，可运行 npm run fetch-data（CShapes 2.1 已随仓库提供）。
 

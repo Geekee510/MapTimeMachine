@@ -14,7 +14,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "fetch-data": "node scripts/fetch-data.mjs",
-    "gen-china": "node scripts/gen-china.mjs"
+    "gen-china": "node scripts/gen-china.mjs",
+    "gen-china-regions": "node scripts/gen-china-regions.mjs",
+    "gen-china-outline": "node scripts/gen-china-outline.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.0.38",
