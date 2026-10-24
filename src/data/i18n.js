@@ -293,9 +293,64 @@ function norm(s) {
     .trim();
 }
 
-// 取中文译名，未收录则回退原名。依次尝试：原名 → 去括号 → 括号前主名
+// historical-basemaps 的历史政权译名（1886 年前的世界疆域）。
+// COUNTRY_ZH 是按 CShapes 现代国名生成的，缺少 Han Empire / Great Khanate 这类古代政权，
+// 故单独维护一张常用表；未收录的仍回退英文原名。
+const HB_ZH = {
+  // 中国
+  'Han': '汉', 'Han Empire': '汉（汉朝）', 'Han Zhao': '汉赵（前赵）',
+  'Tang Empire': '唐（唐朝）', 'Song Empire': '宋（宋朝）',
+  'Ming Empire': '明（明朝）', 'Ming Chinese Empire': '明（明朝）', 'Post-Ming Warlords': '南明政权',
+  'Manchu Empire': '清（清朝）', 'Qing Empire': '清（清朝）', 'Manchuria': '满洲（中国东北）',
+  'Great Khanate': '元（大汗国）', 'Mongol Empire': '蒙古帝国', 'Mongols': '蒙古',
+  'Chagatai Khanate': '察合台汗国', 'Ilkhanate': '伊儿汗国',
+  'Khanate of the Golden Horde': '金帐汗国', 'Khanate of Sibir': '西伯利亚汗国',
+  'Crimean Khanate': '克里米亚汗国', 'Kazan Khanate': '喀山汗国', 'Astrakhan Khanate': '阿斯特拉罕汗国',
+  'Khiva Khanate': '希瓦汗国', 'Bukara Khanate': '布哈拉汗国', 'Quazaq Khanate': '哈萨克汗国',
+  'Khanate of Kazan': '喀山汗国', 'central Asian khanates': '中亚诸汗国', 'Bokhara Khanate': '布哈拉汗国',
+  'Tibet': '吐蕃 / 西藏', 'Tibetan Empire': '吐蕃', 'Tibetans': '吐蕃',
+  'Xixia': '西夏', 'Liao': '辽', 'Jin': '金', 'Jin Empire': '金',
+  'Xia': '夏', 'Zhangzhung Kingdom': '象雄',
+  // 亚洲其他
+  'Japan': '日本', 'Korea': '朝鲜', 'Goryeo': '高丽', 'Joseon': '朝鲜',
+  'Ryukyu': '琉球', 'Dai Viet': '大越', 'Champa': '占城', 'Khmer Empire': '高棉帝国（吴哥）',
+  'Ayutthaya': '阿瑜陀耶', 'Sukhothai': '素可泰', 'Pagan': '蒲甘', 'Srivijaya': '三佛齐',
+  'Kushan Empire': '贵霜帝国', 'Kushan Principalities': '贵霜诸公国',
+  'Maurya': '孔雀王朝', 'Gupta': '笈多王朝', 'Satavahanihara': '百乘王朝',
+  'Chola': '朱罗王朝', 'Chandellas': '昌德拉王朝', 'Chauhans': '乔汉王朝',
+  'Vijayanagara': '毗奢耶那伽罗', 'Delhi Sultanate': '德里苏丹国',
+  'Mughal Empire': '莫卧儿帝国', 'Timurid Empire': '帖木儿帝国',
+  'Persia': '波斯', 'Achaemenid Empire': '波斯（阿契美尼德）', 'Sassanian Empire': '萨珊波斯',
+  'Parthian Empire': '帕提亚（安息）', 'Seljuk': '塞尔柱',
+  'Abbasid Caliphate': '阿拔斯王朝', 'Umayyad Caliphate': '倭马亚王朝',
+  'Rashidun Caliphate': '正统哈里发国', 'Fatimid Caliphate': '法蒂玛王朝',
+  'Mamluk Sultanate': '马穆鲁克苏丹国', 'Safavid Empire': '萨法维（波斯）',
+  'Ottoman Empire': '奥斯曼帝国', 'Turkey (Ottoman Empire)': '奥斯曼帝国',
+  // 欧洲
+  'Roman Empire': '罗马帝国', 'Byzantine Empire': '拜占庭帝国', 'Eastern Roman Empire': '拜占庭帝国',
+  'Holy Roman Empire': '神圣罗马帝国', 'Franks': '法兰克', 'Frankish Empire': '法兰克帝国',
+  'Kievan Rus': '基辅罗斯', 'Novgorod': '诺夫哥罗德', 'Muscovy': '莫斯科公国',
+  'Bulgaria': '保加利亚', 'Bulgar Khanate': '保加利亚汗国',
+  'Cuman Khanates': '库曼汗国', 'Khanty': '汉特', 'Hanover': '汉诺威',
+  'Vikings': '维京', 'Norse': '诺斯（维京）',
+  // 非洲 / 美洲 / 其他
+  'Ghana': '加纳帝国', 'Empire of Ghana': '加纳帝国',
+  'Mali Empire': '马里帝国', 'Songhai': '桑海帝国', 'Kanem': '卡涅姆',
+  'Aksum': '阿克苏姆', 'Ethiopia': '埃塞俄比亚',
+  'Aztec Empire': '阿兹特克帝国', 'Inca Empire': '印加帝国', 'Maya': '玛雅',
+  'Cahokia': '卡霍基亚', 'Anasazi': '阿纳萨齐', 'Mississippian culture': '密西西比文化',
+  'Cochin China': '交趾支那（越南南部）', 'French Indochina': '法属印度支那',
+};
+
+// 供 deck.gl TextLayer 的 characterSet 使用：历史政权译名里的汉字也要包含，
+// 否则 1886 年前的世界标签会出现缺字形（空白方块）。
+export const HB_ZH_VALUES = Object.values(HB_ZH);
+
+// 取中文译名，未收录则回退原名。依次尝试：历史政权表 → 原名 → 去括号 → 括号前主名
 export function zhCountry(en) {
   if (!en) return en;
+  const hb = HB_ZH[en];
+  if (hb) return hb;
   return (
     COUNTRY_ZH[norm(en)] ||
     COUNTRY_ZH[norm(en.replace(/\s*\(.*\)\s*$/, ''))] ||

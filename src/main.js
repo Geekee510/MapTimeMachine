@@ -4,14 +4,30 @@ import './style.css'; // 关键修复：此前样式从未被引入，导致 #ma
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { loadCShapes } from './data/loaders.js';
-import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH } from './data/i18n.js';
+import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.js';
 import { DYNASTIES, getDynastyAtYear } from './data/china.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
 import { createPanel } from './ui/panel.js';
 
-const YEAR_MIN = 1886;
+const YEAR_MIN = -3000; // 世界模式下限：公元前 3000 年（此前为史前考古文化，不做政治疆域）
 const YEAR_MAX = 2023;
+const CSHAPES_START = 1886; // CShapes 2.1 起始年；1886 年之后用 CShapes，之前用 historical-basemaps
+
+// historical-basemaps 的 54 个年代快照（来自其仓库 index.json，按年份升序）
+// 1886 年之前的世界疆域由这些快照提供（该数据 CC BY-SA 4.0，见 README 署名）
+const HB_YEARS = [
+  -3000, -2000, -1500, -1000, -700, -500, -400, -323, -300, -200, -100, -1,
+  100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1279,
+  1300, 1400, 1492, 1500, 1530, 1600, 1650, 1700, 1715, 1783, 1800, 1815, 1878, 1880,
+];
+const hbFileName = (y) => (y < 0 ? `world_bc${-y}` : `world_${y}`);
+// 给定年份，选 <= 该年的最近快照
+function hbYearFor(y) {
+  let best = HB_YEARS[0];
+  for (const yy of HB_YEARS) if (yy <= y) best = yy;
+  return best;
+}
 const CHINA_MIN = -2070;
 const CHINA_MAX = 2023; // 含中华民国(1912–1949)与中华人民共和国(1949– )
 const WORLD_CENTER = [12, 28];
@@ -115,6 +131,117 @@ function buildTerritoryLayer() {
     onClick: (info) => {
       if (info.object && panel) panel.showInfo(info.object.properties);
     },
+  });
+}
+
+// ---- historical-basemaps：1886 年前的世界疆域 ----
+// 按需从 jsDelivr 拉取对应年代的 GeoJSON（不打包进仓库，避免体积膨胀），
+// 加载后缓存，并预取相邻年代，使拖动时间轴时不卡顿（参考 orbis-chronos 的优化经验）。
+const hbCache = new Map(); // 快照年份 -> features
+const hbPending = new Set();
+
+async function ensureHb(year) {
+  if (hbCache.has(year) || hbPending.has(year)) return;
+  hbPending.add(year);
+  const url = `https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/${hbFileName(year)}.geojson`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const gj = await res.json();
+    // 快照有效区间：[本快照年份, 下一快照年份 - 1]，最后一个到 CShapes 起始前一年
+    const i = HB_YEARS.indexOf(year);
+    const endYear = i + 1 < HB_YEARS.length ? HB_YEARS[i + 1] - 1 : CSHAPES_START - 1;
+    const feats = (gj.features || []).map((f) => {
+      const p = f.properties || {};
+      const feat = {
+        type: 'Feature',
+        properties: {
+          cntry_name: p.NAME || '未命名政权',
+          subjecto: p.SUBJECTO || '',
+          partof: p.PARTOF || '',
+          // 有宗主国（SUBJECTO 不同于自身）视为属地/殖民地，否则为独立政权
+          status: p.SUBJECTO && p.SUBJECTO !== p.NAME ? 'colony' : 'independent',
+          borderPrecision: p.BORDERPRECISION ?? null,
+          gwsyear: year,
+          gweyear: endYear,
+          snapYear: year,
+        },
+        geometry: f.geometry,
+      };
+      feat.meta = polygonMeta(f.geometry); // 预计算质心，供标签层使用
+      return feat;
+    });
+    hbCache.set(year, feats);
+    console.info(`[hb] ${year} 年快照：${feats.length} 个政权（有效区间 ${year}~${endYear}）`);
+    const idx = HB_YEARS.indexOf(year);
+    for (const j of [idx - 1, idx + 1, idx + 2]) {
+      if (j >= 0 && j < HB_YEARS.length) ensureHb(HB_YEARS[j]);
+    }
+    updateLayers(); // 数据到位后刷新（此时缓存已有，不会重复触发加载）
+  } catch (e) {
+    console.warn(`[hb] ${year} 年快照加载失败：`, e.message);
+  } finally {
+    hbPending.delete(year);
+  }
+}
+
+// 1886 年前的世界疆域图层（historical-basemaps）
+function buildWorldHistLayer() {
+  const y = hbYearFor(currentYear);
+  const feats = hbCache.get(y);
+  if (!feats) {
+    ensureHb(y); // 首次进入该年代：后台拉取，拉取完成后 updateLayers 自动重绘
+    return null;
+  }
+  return new GeoJsonLayer({
+    id: 'territory',
+    data: { type: 'FeatureCollection', features: feats },
+    getFillColor: (f) => statusColor(f.properties),
+    getLineColor: [45, 45, 45, 200],
+    getLineWidth: 0.8,
+    lineWidthMinPixels: 0.5,
+    stroked: true,
+    filled: true,
+    pickable: true,
+    autoHighlight: true,
+    highlightColor: [255, 255, 255, 60],
+    onClick: (info) => {
+      if (info.object && panel) panel.showInfo(info.object.properties);
+    },
+  });
+}
+
+// 1886 年前的政权名称标签
+function buildWorldHistLabelLayer() {
+  const y = hbYearFor(currentYear);
+  const feats = hbCache.get(y);
+  const z = map ? map.getZoom() : 0;
+  if (!feats || z < 2 || labelChars === 'auto') return null;
+  const minDiag = z < 3 ? 8 : z < 4 ? 3.5 : z < 5 ? 1.2 : 0;
+  const byName = new Map();
+  for (const f of feats) {
+    if (!f.meta || !f.meta.c || f.meta.d < minDiag) continue;
+    const name = f.properties.cntry_name;
+    const prev = byName.get(name);
+    if (!prev || f.meta.d > prev.meta.d) byName.set(name, f);
+  }
+  const data = [...byName.values()].map((f) => ({
+    coordinates: f.meta.c,
+    text: labelChinese ? (zhCountry(f.properties.cntry_name) || f.properties.cntry_name) : f.properties.cntry_name,
+  }));
+  return new TextLayer({
+    id: 'territory-label',
+    data,
+    getPosition: (d) => d.coordinates,
+    getText: (d) => d.text,
+    getSize: z > 5 ? 16 : 14,
+    getColor: [25, 25, 25, 250],
+    fontFamily: 'Microsoft YaHei, sans-serif',
+    fontWeight: 700,
+    fontSettings: { sdf: true, fontSize: 128, buffer: 8 },
+    characterSet: labelChars,
+    updateTriggers: { getText: labelChinese },
+    pickable: false,
   });
 }
 
@@ -336,6 +463,7 @@ function computeLabelChars() {
     add(d.name); add(d.capital);
     if (d.states) for (const s of d.states) { add(s.name); add(s.capital); } // 战国政权名/都城
   }
+  for (const v of HB_ZH_VALUES) add(v); // 1886 年前的历史政权译名（如"阿拔斯王朝"）
   labelChars = [...s];
 }
 
@@ -534,11 +662,19 @@ function updateLayers() {
     deckOverlay.setProps({ layers });
     return;
   }
-  // 世界模式（原有逻辑）
+  // 世界模式
   if (layersState.territory) {
-    layers.push(buildTerritoryLayer());
-    const lbl = buildTerritoryLabelLayer();
-    if (lbl) layers.push(lbl);
+    if (currentYear < CSHAPES_START) {
+      // 1886 年之前：CShapes 无数据，改用 historical-basemaps 的年代快照
+      const t = buildWorldHistLayer();
+      if (t) layers.push(t);
+      const lbl = buildWorldHistLabelLayer();
+      if (lbl) layers.push(lbl);
+    } else {
+      layers.push(buildTerritoryLayer());
+      const lbl = buildTerritoryLabelLayer();
+      if (lbl) layers.push(lbl);
+    }
   }
   if (layersState.river && rivers) {
     layers.push(...buildRiverLayer());
@@ -774,7 +910,13 @@ async function init() {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
           // 则换成该时段的属性重绘（存续/历时/事件随之更新）；已不存在则清空介绍卡。
           const props = panel.currentProps ? panel.currentProps() : null;
-          if (props && props.cntry_name) {
+          if (props && props.cntry_name && currentYear < CSHAPES_START) {
+            // 1886 年前：在 historical-basemaps 快照里找同名政权（跨年代时同步卡片）
+            const feats = hbCache.get(hbYearFor(currentYear)) || [];
+            const hit = feats.find((f) => f.properties.cntry_name === props.cntry_name);
+            if (hit) panel.showInfo(hit.properties);
+            else panel.hide();
+          } else if (props && props.cntry_name) {
             const t = territories.find(
               (t) =>
                 currentYear >= t.startYear &&

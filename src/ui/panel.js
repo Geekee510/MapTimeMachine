@@ -211,12 +211,18 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     rows.push(
       `<div><span class="k">类型：</span><span class="status-tag" style="background:${st[1]}">${st[0]}</span></div>`
     );
-    if (RULE_LABEL[props.status] && typeof rulerName === 'function') {
-      // 取该政权存续起始年的宗主国名（如英属索马里 1886 → 英国；东占区 1945 → 苏联）
-      const rulerEn = rulerName(props.ruledby, props.gwsyear ?? viewYear ?? 2023);
-      if (rulerEn) {
-        const rulerZh = zhCountry(rulerEn); // 俄罗斯（苏联）/ 德国（普鲁士）等历史别名均可译出
-        rows.push(`<div><span class="k">${RULE_LABEL[props.status]}：</span>${rulerZh || rulerEn}</div>`);
+    // 宗主国 / 占领国：CShapes 用 ruledby（GW 编码反查），
+    // historical-basemaps（1886 年前）直接带 SUBJECTO 国名字符串。
+    if (RULE_LABEL[props.status]) {
+      let rulerZh = '';
+      if (props.subjecto) {
+        rulerZh = zhCountry(props.subjecto) || props.subjecto;
+      } else if (typeof rulerName === 'function') {
+        const rulerEn = rulerName(props.ruledby, props.gwsyear ?? viewYear ?? 2023);
+        if (rulerEn) rulerZh = zhCountry(rulerEn) || rulerEn; // 俄罗斯（苏联）/ 德国（普鲁士）等历史别名均可译出
+      }
+      if (rulerZh) {
+        rows.push(`<div><span class="k">${RULE_LABEL[props.status]}：</span>${rulerZh}</div>`);
       }
     }
     if (props.capname) rows.push(`<div><span class="k">首都：</span>${props.capname}</div>`);
