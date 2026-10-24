@@ -44,7 +44,7 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, region: true, river: true, mountain: true, lake: false, basemapLand: false };
+const layersState = { territory: true, region: true, relief: false, river: true, mountain: true, lake: false, basemapLand: false };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
 let chinaDynasties = null; // china_dynasties.geojson 的 features 数组（省界拼接的疆域底图）
@@ -109,7 +109,50 @@ const STATUS_COLOR = {
   occupied: [200, 70, 70, 245], // 被占领土（红）
 };
 function statusColor(props) {
-  return STATUS_COLOR[props.status] || [170, 170, 170, 245];
+  const c = STATUS_COLOR[props.status] || [170, 170, 170, 245];
+  // 开启地形晕渲时降低疆域不透明度，让底下的山体起伏阴影透出来
+  // （晕渲层在底图样式内，deck.gl 覆盖层在其上，只能靠透明度让二者共存）
+  return layersState.relief ? [c[0], c[1], c[2], 150] : c;
+}
+
+// ---- 地形晕渲（山脉形势图）----
+// 用 Amazon Terrain Tiles 的 terrarium 编码 DEM 做 MapLibre hillshade，
+// 喜马拉雅、安第斯、阿尔卑斯、天山、昆仑等山脉的起伏都能真实呈现
+// （Natural Earth 的山脉点只有 219 个小山丘，没有主山系；OSM Overpass 拉取 mountain_range 又超时）。
+const DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
+function applyRelief() {
+  if (!map || !map.isStyleLoaded()) return;
+  const show = !!layersState.relief;
+  try {
+    if (!map.getSource('dem')) {
+      map.addSource('dem', {
+        type: 'raster-dem',
+        tiles: [DEM_TILES],
+        encoding: 'terrarium',
+        tileSize: 256,
+        maxzoom: 12,
+        attribution: '地形：Mapzen / Amazon Terrain Tiles',
+      });
+    }
+    if (!map.getLayer('hillshade')) {
+      map.addLayer({
+        id: 'hillshade',
+        type: 'hillshade',
+        source: 'dem',
+        paint: {
+          'hillshade-exaggeration': 0.6,
+          'hillshade-shadow-color': '#4a3524',
+          'hillshade-highlight-color': '#f2ece2',
+          'hillshade-accent-color': '#7d5c3c',
+        },
+      });
+    }
+    if (map.getLayer('hillshade')) {
+      map.setLayoutProperty('hillshade', 'visibility', show ? 'visible' : 'none');
+    }
+  } catch (e) {
+    console.warn('[relief] 地形晕渲图层不可用：', e.message);
+  }
 }
 
 function buildTerritoryLayer() {
@@ -123,6 +166,7 @@ function buildTerritoryLayer() {
     getLineColor: [45, 45, 45, 230],
     getLineWidth: 1,
     lineWidthMinPixels: 0.6,
+    updateTriggers: { getFillColor: layersState.relief }, // 晕渲开关联动填充透明度
     stroked: true,
     filled: true,
     pickable: true,
@@ -200,6 +244,7 @@ function buildWorldHistLayer() {
     getLineColor: [45, 45, 45, 200],
     getLineWidth: 0.8,
     lineWidthMinPixels: 0.5,
+    updateTriggers: { getFillColor: layersState.relief },
     stroked: true,
     filled: true,
     pickable: true,
@@ -544,10 +589,11 @@ function buildChinaOutlineLayer() {
   return new GeoJsonLayer({
     id: 'china-outline',
     data: { type: 'FeatureCollection', features: [best] },
-    getFillColor: [178, 84, 58, 235], // 朱红（与省界拼接底图同色）
+    getFillColor: layersState.relief ? [178, 84, 58, 150] : [178, 84, 58, 235], // 朱红；晕渲时半透明
     getLineColor: [90, 30, 18, 240],
     getLineWidth: 1.6,
     lineWidthMinPixels: 1,
+    updateTriggers: { getFillColor: layersState.relief },
     stroked: true,
     filled: true,
     pickable: true,
@@ -882,6 +928,7 @@ async function init() {
     map.on('load', () => {
       tryAddOverlay();
       applyBasemapLand();
+      applyRelief();
     });
     map.on('error', (e) => {
       console.error('[map error]', e && e.error);
@@ -941,6 +988,7 @@ async function init() {
         } else {
           layersState[k] = v;
           if (k === 'basemapLand') applyBasemapLand();
+          if (k === 'relief') applyRelief(); // 地形晕渲（同时疆域填充会降低不透明度）
         }
         updateLayers();
         if (panel && panel.rerender) panel.rerender(); // 刷新打开中的信息卡（简介+事件随语言/图层同步）

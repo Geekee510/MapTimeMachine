@@ -74,6 +74,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tRegion = document.getElementById('toggle-region');
   const tRiver = document.getElementById('toggle-river');
   const tMountain = document.getElementById('toggle-mountain');
+  const tRelief = document.getElementById('toggle-relief');
   const tLake = document.getElementById('toggle-lake');
   const tBasemap = document.getElementById('toggle-basemap');
   const tZh = document.getElementById('toggle-zh');
@@ -88,6 +89,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   tRegion?.addEventListener('change', () => onToggleLayer('region', tRegion.checked));
   tRiver.addEventListener('change', () => onToggleLayer('river', tRiver.checked));
   tMountain.addEventListener('change', () => onToggleLayer('mountain', tMountain.checked));
+  tRelief?.addEventListener('change', () => onToggleLayer('relief', tRelief.checked));
   tLake.addEventListener('change', () => onToggleLayer('lake', tLake.checked));
   tBasemap.addEventListener('change', () => onToggleLayer('basemapLand', tBasemap.checked));
   tZh.addEventListener('change', () => onToggleLayer('zh', tZh.checked));
