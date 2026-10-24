@@ -285,7 +285,8 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     },
     // 年份或中英文切换后，刷新当前打开的卡片（简介 + 事件板块同步）
     rerender() {
-      if (lastProps) render(lastProps);
+      // 守卫：卡片处于关闭状态（如模式切换后）时不得借刷新重新弹出
+      if (lastProps && !info.classList.contains('hidden')) render(lastProps);
     },
   };
 }

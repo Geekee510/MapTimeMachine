@@ -584,10 +584,16 @@ function setMode(m) {
   document.getElementById('mode-world')?.classList.toggle('active', m === 'world');
   document.getElementById('mode-china')?.classList.toggle('active', m === 'china');
   chinaInfoOpen = false;
-  const info = document.getElementById('info');
-  if (info) info.classList.add('hidden');
-  const ie = document.getElementById('info-events');
-  if (ie) { ie.classList.add('hidden'); ie.innerHTML = ''; }
+  // 关闭介绍卡：必须走 panel.hide() 清空内部 lastProps 状态。
+  // 此前只直接给 DOM 加 hidden，lastProps 仍在，之后任意图层开关触发 rerender()
+  // 会把上一模式的国家卡重新弹出来（世界点国家→切中国→取消历史疆域→弹框）。
+  if (panel) panel.hide();
+  else {
+    const info0 = document.getElementById('info');
+    if (info0) info0.classList.add('hidden');
+    const ie0 = document.getElementById('info-events');
+    if (ie0) { ie0.classList.add('hidden'); ie0.innerHTML = ''; }
+  }
   if (m === 'china') {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
