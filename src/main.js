@@ -477,6 +477,7 @@ async function init() {
         currentYear = y;
         updateYearLabel();
         updateLayers();
+        if (panel && panel.rerender) panel.rerender(); // 年份变化→事件板块按"截至当前年份"实时过滤
       },
     });
     panel = createPanel({
@@ -488,6 +489,7 @@ async function init() {
           if (k === 'basemapLand') applyBasemapLand();
         }
         updateLayers();
+        if (panel && panel.rerender) panel.rerender(); // 刷新打开中的信息卡（简介+事件随语言/图层同步）
       },
       onReset: () => map.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 }),
     });
