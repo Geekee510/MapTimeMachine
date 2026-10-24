@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>世界历史动态地图 · MVP</title>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- 年份大字 -->
+    <div id="year-display">1960</div>
+
+    <!-- 加载提示 -->
+    <div id="loading">正在加载历史疆域数据（CShapes 1886–2023）…</div>
+
+    <!-- 信息卡 -->
+    <div id="info" class="hidden">
+      <button id="info-close">×</button>
+      <h3 id="info-name"></h3>
+      <div id="info-body"></div>
+    </div>
+
+    <!-- 图例 -->
+    <div id="legend">
+      <div class="legend-title">政权类型</div>
+      <div class="legend-row"><span class="sw" style="background:rgb(150,190,140)"></span>独立国家</div>
+      <div class="legend-row"><span class="sw" style="background:rgb(230,200,130)"></span>殖民地</div>
+      <div class="legend-row"><span class="sw" style="background:rgb(225,160,90)"></span>保护国</div>
+      <div class="legend-row"><span class="sw" style="background:rgb(190,130,180)"></span>托管地</div>
+      <div class="legend-row"><span class="sw" style="background:rgb(200,70,70)"></span>被占领土</div>
+    </div>
+
+    <!-- 右侧图层面板 -->
+    <div id="panel">
+      <div class="panel-title">图层</div>
+      <label><input type="checkbox" id="toggle-territory" checked /> 历史疆域</label>
+      <label><input type="checkbox" id="toggle-river" checked /> 主要河流</label>
+      <label><input type="checkbox" id="toggle-mountain" checked /> 山脉</label>
+      <label><input type="checkbox" id="toggle-lake" /> 湖泊</label>
+      <label><input type="checkbox" id="toggle-basemap" /> 底图陆地（含小岛）</label>
+      <label><input type="checkbox" id="toggle-zh" checked /> 中文标签</label>
+      <button id="reset-view">复位视图</button>
+      <div class="panel-note">底图：MapLibre demotiles（含陆地/水域/国界）<br/>疆域：CShapes 2.1（CC BY-NC-SA）<br/>河流/山脉/湖泊：Natural Earth（公共领域，需先运行 <code>npm run fetch-data</code>）</div>
+    </div>
+
+    <!-- 底部时间轴 -->
+    <div id="timeline">
+      <button id="play-btn">▶ 播放</button>
+      <button id="step-back" title="后退当前粒度一步">◀</button>
+      <input type="range" id="year-slider" min="1886" max="2023" value="1960" step="1" />
+      <button id="step-fwd" title="前进当前粒度一步">▶</button>
+      <select id="speed-select">
+        <option value="1">1×</option>
+        <option value="2">2×</option>
+        <option value="5" selected>5×</option>
+        <option value="10">10×</option>
+      </select>
+      <span id="year-readout">1960</span>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

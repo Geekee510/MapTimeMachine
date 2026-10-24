@@ -1,0 +1,27 @@
+{
+  "name": "maptimemachine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "世界地理历史动态可视化 MVP（公益学术 / 2D / 先期验证）：历史疆域 + 河流/山脉/湖泊，时间轴播放",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Geekee510/maptimemachine.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "fetch-data": "node scripts/fetch-data.mjs"
+  },
+  "dependencies": {
+    "@deck.gl/core": "^9.0.38",
+    "@deck.gl/layers": "^9.0.38",
+    "@deck.gl/mapbox": "^9.0.38",
+    "maplibre-gl": "^4.7.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}

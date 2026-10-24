@@ -1,0 +1,15 @@
+# 依赖与构建产物
+node_modules/
+dist/
+.vite/
+
+# 本地工作流 / 缓存（非项目交付物）
+.workbuddy/
+
+# 生成数据：运行时由 npm run fetch-data 重建，或手动放置
+# 不入库以保持仓库精简、并尊重 CShapes(CC BY-NC-SA) 许可
+public/data/*.geojson
+
+# 编辑器 / 系统
+.DS_Store
+*.local

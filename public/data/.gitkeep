@@ -1,0 +1,6 @@
+# 本目录存放地图数据（.geojson）。
+# 这些文件已被 .gitignore 排除，不会入库。获取方式：
+#   1) 河流/山脉/湖泊：运行 `npm run fetch-data`（从 Natural Earth 公共领域数据拉取）
+#   2) 历史疆域：自行从 CShapes 项目下载 cshapes-2.1.geojson 放入本目录
+#      （来源 https://cshapes.org ，许可 CC BY-NC-SA 4.0，约 26MB）
+# 参见仓库根目录 README.md 的「数据说明」一节。
