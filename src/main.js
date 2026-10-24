@@ -324,9 +324,9 @@ function buildWorldHistLabelLayer() {
     getText: (d) => d.text,
     getSize: z > 5 ? 16 : 14,
     getColor: [25, 25, 25, 250],
-    fontFamily: 'Microsoft YaHei, sans-serif',
+    fontFamily: LABEL_FONT_FAMILY,
     fontWeight: 700,
-    fontSettings: { sdf: true, fontSize: 128, buffer: 8 },
+    fontSettings: labelFontSettings,
     characterSet: labelChars,
     updateTriggers: { getText: labelChinese },
     pickable: false,
@@ -392,9 +392,9 @@ function buildRiverLayer() {
         getSize: 12,
         getColor: [20, 60, 120, 255],
         getPixelOffset: [0, -6],
-        fontFamily: 'Microsoft YaHei, sans-serif',
+        fontFamily: LABEL_FONT_FAMILY,
         fontWeight: 700,
-        fontSettings: { sdf: true, fontSize: 128, buffer: 8 }, // 提高字体图集分辨率，SDF 渲染更锐利
+        fontSettings: labelFontSettings,
         characterSet: labelChars,
         updateTriggers: { getText: labelChinese }, // 防御：与山脉层同理，声明文字对开关的依赖
         pickable: false,
@@ -440,9 +440,9 @@ function buildMountainLayers() {
         getSize: 13,
         getColor: [90, 60, 40, 255],
         getPixelOffset: [0, -9],
-        fontFamily: 'Microsoft YaHei, sans-serif',
+        fontFamily: LABEL_FONT_FAMILY,
         fontWeight: 700,
-        fontSettings: { sdf: true, fontSize: 128, buffer: 8 },
+        fontSettings: labelFontSettings,
         characterSet: labelChars,
         // 关键：data 传的是同一数组引用（mountains.features），deck.gl 不会因 getText 闭包变化
         // 重算文字属性；必须用 updateTriggers 声明依赖，否则中英切换后标签停留在首次渲染的文字
@@ -538,6 +538,52 @@ function rulerName(gwcode, year) {
   return hit ? hit.name : null;
 }
 
+// ---- 标签字体配置 ----
+// fontFamily 里的字体名含空格，必须加引号，否则部分浏览器解析 ctx.font 失败退回默认字体。
+const LABEL_FONT_FAMILY =
+  '"Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif';
+
+// deck.gl 的 SDF 字体图集：canvas 宽度固定 1024（MAX_CANVAS_WIDTH），
+// 高度 = nextPowOfTwo(行数 × 行高)，行数随字符集增大而增加。
+// 一旦高度超过 GPU 的 MAX_TEXTURE_SIZE（桌面常见 16384，部分环境 8192），
+// 纹理上传失败 → **所有标签渲染成小方块（豆腐块）**。
+// 译名表扩充到 4400+ 条后字符集已达 800+，原先 fontSize:128/buffer:8 会让图集高 32768，
+// 直接超限。故按字符集大小自适应选字号，保证图集高度 ≤ 8192。
+// 上限取「8192」与「本机 GPU 实际 MAX_TEXTURE_SIZE」的较小值（不同机器差异很大）。
+let maxAtlasHeight = 8192;
+function detectMaxAtlasHeight() {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2') || c.getContext('webgl');
+    if (gl) {
+      const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      if (max) maxAtlasHeight = Math.min(8192, max);
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  } catch (e) {
+    /* 探测失败就用默认 8192 */
+  }
+}
+
+const FONT_SIZE_CANDIDATES = [[64, 4], [48, 4], [32, 3], [24, 2]];
+let labelFontSettings = { sdf: true, fontSize: FONT_SIZE_CANDIDATES[0][0], buffer: FONT_SIZE_CANDIDATES[0][1], radius: 8, cutoff: 0.25 };
+
+function pickFontSettings(charCount) {
+  const atlasHeight = (F, B) => {
+    const perRow = Math.max(1, Math.floor(1024 / (F + 2 * B))); // canvas 宽 1024
+    const rows = Math.ceil(charCount / perRow);
+    const rowHeight = 1.2 * F + 2 * B; // ascent+descent ≈ 1.2×fontSize
+    return Math.pow(2, Math.ceil(Math.log2(Math.max(1, rows * rowHeight)))); // nextPowOfTwo
+  };
+  for (const [F, B] of FONT_SIZE_CANDIDATES) {
+    if (atlasHeight(F, B) <= maxAtlasHeight) {
+      return { sdf: true, fontSize: F, buffer: B, radius: F >= 64 ? 8 : 6, cutoff: 0.25 };
+    }
+  }
+  const [F, B] = FONT_SIZE_CANDIDATES[FONT_SIZE_CANDIDATES.length - 1];
+  return { sdf: true, fontSize: F, buffer: B, radius: 6, cutoff: 0.25 };
+}
+
 // deck.gl TextLayer 的 characterSet：必须显式包含所有用到的字符（默认 auto 只含 ASCII，中文会缺字形）。
 // 加载数据后收集全部可能出现的标签字符。
 let labelChars = 'auto';
@@ -553,6 +599,8 @@ function computeLabelChars() {
   }
   for (const v of HB_ZH_VALUES) add(v); // 1886 年前的历史政权译名（如"阿拔斯王朝"）
   labelChars = [...s];
+  detectMaxAtlasHeight();
+  labelFontSettings = pickFontSettings(s.size);
 }
 
 // 国家名称标签：中文名，盖在疆域之上（deck 覆盖层整体位于地图之上）。
@@ -585,9 +633,9 @@ function buildTerritoryLabelLayer() {
     getText: (d) => d.text,
     getSize: z > 5 ? 16 : 14,
     getColor: [25, 25, 25, 250],
-    fontFamily: 'Microsoft YaHei, sans-serif',
+    fontFamily: LABEL_FONT_FAMILY,
     fontWeight: 700,
-    fontSettings: { sdf: true, fontSize: 128, buffer: 8 },
+    fontSettings: labelFontSettings,
     characterSet: labelChars,
     updateTriggers: { getText: labelChinese }, // 防御：声明文字对开关的依赖
     pickable: false,
@@ -733,9 +781,9 @@ function buildChinaCapitalLayer() {
       getSize: 13,
       getColor: [120, 20, 20, 255],
       getPixelOffset: [0, -10],
-      fontFamily: 'Microsoft YaHei, sans-serif',
+      fontFamily: LABEL_FONT_FAMILY,
       fontWeight: 700,
-      fontSettings: { sdf: true, fontSize: 128, buffer: 8 },
+      fontSettings: labelFontSettings,
       characterSet: labelChars,
       pickable: false,
     }),
