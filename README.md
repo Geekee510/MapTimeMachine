@@ -149,6 +149,7 @@ MapTimeMachine/
   - CShapes 2.1：CC BY-NC-SA 4.0（**非商业用途**，需署名与相同方式共享，来源 cshapes.org）。本仓库随附该数据仅用于公益学术展示与本地研究；若用于商业用途，请自行从 cshapes.org 获取授权。
   - Natural Earth：Public Domain（公共领域，可自由使用）。
   - 阿里云 DataV.GeoAtlas（中国省级边界）：来源公开，仅用于学习 / 公益展示，禁止商用或转售（详见 DataV 使用条款）。
+  - flag-icons（国旗 SVG，`public/flags/`）：MIT License，© Lipis（github.com/lipis/flag-icons）。
 
 请在使用时遵守对应数据的许可条款；本项目为公益学术先期验证，不用于商业盈利。
 
