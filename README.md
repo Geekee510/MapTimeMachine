@@ -42,33 +42,30 @@
 ## 三、安装与使用
 
 ### 环境要求
-- Node.js 18+（仓库根目录含 `.nvmrc`）
+- Node.js 18+（仓库根目录含 `.nvmrc`，推荐 22）
 - npm
 
 ### 步骤
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/Geekee510/maptimemachine.git
-cd maptimemachine
+# 1. 克隆仓库（地理数据已随仓库提供，无需额外下载）
+git clone https://github.com/Geekee510/MapTimeMachine.git
+cd MapTimeMachine
 
 # 2. 安装依赖
 npm install
 
-# 3. 拉取自然地理数据（河流 / 山脉 / 湖泊，来自 Natural Earth 公共领域，需联网）
+# 3.（可选）重新生成 Natural Earth 数据（河流 / 山脉 / 湖泊，来自公共领域）
+#    CShapes 2.1 历史疆域数据已随仓库提供，无需此步
 npm run fetch-data
 
-# 4. 手动放置历史疆域数据
-#    从 https://cshapes.org 下载 cshapes-2.1.geojson（约 26MB，CC BY-NC-SA 4.0）
-#    放到 public/data/cshapes-2.1.geojson
-
-# 5. 本地开发（默认 http://localhost:5173）
+# 4. 本地开发（默认 http://localhost:5173）
 npm run dev
 
-# 6. 构建（产物在 dist/，可托管到任意静态服务器 / Linux）
+# 5. 构建（产物在 dist/，纯静态文件）
 npm run build
 
-# 7. 预览构建产物
+# 6. 预览构建产物
 npm run preview
 ```
 
@@ -78,26 +75,28 @@ npm run preview
 
 ## 四、数据说明（重要）
 
-`public/data/` 下的 `.geojson` **不入库**（已在 `.gitignore` 排除），原因有二：保持仓库精简、并尊重 CShapes 的 CC BY-NC-SA 许可（我们仅链接来源，不重新分发其 26MB 原文件）。
+为便于一键部署与「克隆即运行」，本仓库已将 `public/data/` 下的所有 `.geojson` 数据**随仓库提交**（含 CShapes 2.1 历史疆域 26MB）。如本地数据损坏，仍可用 `npm run fetch-data` 重新生成 Natural Earth 三类数据（CShapes 需另行从 cshapes.org 获取或已在仓库中）。
 
 | 文件 | 来源 | 许可 | 获取方式 |
 | --- | --- | --- | --- |
-| `ne_rivers.geojson` | Natural Earth 50m 河流中心线 | Public Domain | `npm run fetch-data` |
-| `ne_mountains.geojson` | Natural Earth 10m 山脉 / 高原（取质心成点） | Public Domain | `npm run fetch-data` |
-| `ne_lakes.geojson` | Natural Earth 50m 湖泊 | Public Domain | `npm run fetch-data` |
-| `cshapes-2.1.geojson` | CShapes 2.1 历史疆域 | **CC BY-NC-SA 4.0（非商业）** | 自行从 cshapes.org 下载后放入 |
+| `ne_rivers.geojson` | Natural Earth 50m 河流中心线 | Public Domain | 随仓库 / `npm run fetch-data` |
+| `ne_mountains.geojson` | Natural Earth 10m 山脉 / 高原（取质心成点） | Public Domain | 随仓库 / `npm run fetch-data` |
+| `ne_lakes.geojson` | Natural Earth 50m 湖泊 | Public Domain | 随仓库 / `npm run fetch-data` |
+| `cshapes-2.1.geojson` | CShapes 2.1 历史疆域 | **CC BY-NC-SA 4.0（非商业）** | 随仓库提供 |
 
-`scripts/fetch-data.mjs` 会从 GitHub raw（jsDelivr 兜底）拉取 Natural Earth 数据并做字段裁剪，离线环境可手动下载对应文件放入 `public/data/`。
+`scripts/fetch-data.mjs` 会从 GitHub raw（jsDelivr 兜底）拉取 Natural Earth 数据并做字段裁剪。
 
 ---
 
 ## 五、目录结构
 
 ```
-maptimemachine/
+MapTimeMachine/
 ├── index.html              # 页面骨架：地图容器、图层面板、时间轴、信息卡
-├── vite.config.js          # Vite 配置（base './'）
+├── vite.config.js          # Vite 配置（base './'，适配 GitHub Pages 子路径）
 ├── package.json
+├── .github/workflows/
+│   └── deploy.yml          # GitHub Pages 自动部署工作流
 ├── scripts/
 │   └── fetch-data.mjs      # 一键拉取 Natural Earth 河流/山脉/湖泊
 ├── src/
@@ -111,7 +110,7 @@ maptimemachine/
 │       ├── panel.js        # 右侧图层开关 + 信息卡
 │       └── timeline.js     # 时间轴控件（滑块 / 播放 / 步进 / 步长）
 ├── public/
-│   └── data/               # 数据目录（.geojson 不入库，需按第四节获取）
+│   └── data/               # 数据目录（.geojson 已随仓库提供，含 CShapes 26MB）
 └── 世界地理历史动态网站_需求与可行性分析报告.md  # 原始需求与可行性分析
 ```
 
@@ -119,6 +118,15 @@ maptimemachine/
 
 ## 六、部署
 
+### 方案 A：GitHub Pages 自动部署（推荐，免费）
+本仓库已配置 GitHub Actions（`.github/workflows/deploy.yml`）：推送 `main` 分支即自动构建并发布到 GitHub Pages，任何人可通过 `https://<用户名>.github.io/MapTimeMachine/` 访问。
+
+**首次启用步骤：**
+1. 进入仓库 **Settings → Pages**；
+2. **Build and deployment → Source** 选择 **GitHub Actions**；
+3. 此后每次 push 到 `main` 会自动部署（仓库 **Actions** 标签页可看进度）。
+
+### 方案 B：自建静态托管
 - `npm run build` 产出 `dist/`，是**纯静态文件**，`base: './'` 可直接托管到任意子目录或 Linux 静态服务器（Nginx / Caddy / 对象存储等）。
 - 正式部署建议将 CShapes 改为 **PMTiles 矢量瓦片**，按需加载、节省 90%+ 流量；详见仓库内《需求与可行性分析报告》。
 - 当前 MVP 使用全精度 CShapes（26MB），适合本机 / 小范围验证。
@@ -129,7 +137,7 @@ maptimemachine/
 
 - **代码**：MIT License —— 见仓库根目录 `LICENSE`。
 - **数据**：
-  - CShapes 2.1：CC BY-NC-SA 4.0（**非商业用途**，需署名与相同方式共享）。
+  - CShapes 2.1：CC BY-NC-SA 4.0（**非商业用途**，需署名与相同方式共享，来源 cshapes.org）。本仓库随附该数据仅用于公益学术展示与本地研究；若用于商业用途，请自行从 cshapes.org 获取授权。
   - Natural Earth：Public Domain（公共领域，可自由使用）。
 
 请在使用时遵守对应数据的许可条款；本项目为公益学术先期验证，不用于商业盈利。
