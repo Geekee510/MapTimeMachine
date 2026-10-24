@@ -69,7 +69,7 @@ export function flagOf(enName) {
   return FLAGS[base] || '';
 }
 
-export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
+export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tRiver = document.getElementById('toggle-river');
   const tMountain = document.getElementById('toggle-mountain');
@@ -190,6 +190,8 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
     }
 
     const st = STATUS_LABEL[props.status] || ['其他', '#999'];
+    // 非独立政权（殖民地/保护国/托管地/被占领土）：CShapes ruledby=宗主国/占领国 GW 编码
+    const RULE_LABEL = { colony: '殖民主国', protectorate: '宗主国', mandate: '托管国', occupied: '占领国' };
     const rows = [];
     const start = props.gwsyear != null ? props.gwsyear : null;
     const end = props.gweyear != null ? props.gweyear : null;
@@ -207,6 +209,14 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
     rows.push(
       `<div><span class="k">类型：</span><span class="status-tag" style="background:${st[1]}">${st[0]}</span></div>`
     );
+    if (RULE_LABEL[props.status] && typeof rulerName === 'function') {
+      // 取该政权存续起始年的宗主国名（如英属索马里 1886 → 英国；东占区 1945 → 苏联）
+      const rulerEn = rulerName(props.ruledby, props.gwsyear ?? viewYear ?? 2023);
+      if (rulerEn) {
+        const rulerZh = zhCountry(rulerEn); // 俄罗斯（苏联）/ 德国（普鲁士）等历史别名均可译出
+        rows.push(`<div><span class="k">${RULE_LABEL[props.status]}：</span>${rulerZh || rulerEn}</div>`);
+      }
+    }
     if (props.capname) rows.push(`<div><span class="k">首都：</span>${props.capname}</div>`);
     if (props.area != null)
       rows.push(`<div><span class="k">面积：</span>${Math.round(Number(props.area)).toLocaleString()} km²</div>`);

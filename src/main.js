@@ -293,6 +293,34 @@ function precomputeTerritoryMeta() {
   }
 }
 
+// ---- 宗主国/占领国查询（CShapes ruledby = 统治国 GW 编码）----
+const gwcodeIndex = new Map(); // gwcode -> [{startYear,endYear,name}]
+const SPECIAL_RULERS = { 1: '联合国（临时行政当局）' }; // ruledby=0（但泽自由市）不显示
+function buildGwcodeIndex() {
+  gwcodeIndex.clear();
+  for (const t of territories) {
+    const p = t.feature.properties;
+    if (p.gwcode == null) continue;
+    let arr = gwcodeIndex.get(p.gwcode);
+    if (!arr) gwcodeIndex.set(p.gwcode, (arr = []));
+    arr.push({ startYear: t.startYear, endYear: t.endYear, name: p.cntry_name });
+  }
+}
+// 给定统治国 GW 编码与年份，返回当时的国名（优先同年，否则取时间最近的一片）
+function rulerName(gwcode, year) {
+  if (gwcode == null) return null;
+  if (SPECIAL_RULERS[gwcode]) return SPECIAL_RULERS[gwcode];
+  const arr = gwcodeIndex.get(gwcode);
+  if (!arr || !arr.length) return null;
+  const hit =
+    arr.find((a) => year >= a.startYear && year <= a.endYear) ||
+    arr.reduce((best, a) => {
+      if (!best) return a;
+      return Math.abs(a.startYear - year) < Math.abs(best.startYear - year) ? a : best;
+    }, null);
+  return hit ? hit.name : null;
+}
+
 // deck.gl TextLayer 的 characterSet：必须显式包含所有用到的字符（默认 auto 只含 ASCII，中文会缺字形）。
 // 加载数据后收集全部可能出现的标签字符。
 let labelChars = 'auto';
@@ -657,6 +685,7 @@ async function init() {
       },
     });
     panel = createPanel({
+      rulerName, // 宗主国/占领国查询（殖民地/保护国/托管地/被占领土卡片显示"被谁统治"）
       onToggleLayer: (k, v) => {
         if (k === 'zh') {
           labelChinese = v;
@@ -707,6 +736,7 @@ async function init() {
         cshapesDone = true;
         territories = ts;
         precomputeTerritoryMeta();
+        buildGwcodeIndex(); // 建 GW 编码索引（供“被谁占领/殖民”查询）
         refresh();
         settle();
       })
