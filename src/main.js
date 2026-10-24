@@ -5,13 +5,19 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { loadCShapes } from './data/loaders.js';
 import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH } from './data/i18n.js';
+import { DYNASTIES, getDynastyAtYear } from './data/china.js';
+import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
 import { createPanel } from './ui/panel.js';
 
 const YEAR_MIN = 1886;
 const YEAR_MAX = 2023;
+const CHINA_MIN = -221;
+const CHINA_MAX = 1912;
 const WORLD_CENTER = [12, 28];
 const WORLD_ZOOM = 1.4;
+const CHINA_CENTER = [104, 36]; // 中国大致中心（华北/中原一带）
+const CHINA_ZOOM = 3.6;
 
 let currentYear = 1960;
 let territories = [];
@@ -24,6 +30,9 @@ let panel = null;
 let timeline = null; // 时间轴控件引用
 const layersState = { territory: true, river: true, mountain: true, lake: false, basemapLand: false };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
+let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
+let chinaDynasties = null; // china_dynasties.geojson 的 features 数组
+let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
 
 // 底图陆地显隐：CShapes 疆域数据不含小岛屿，底图(demotiles)却会画出
 // 大量沿岸小岛 → 海面上出现"白色小点"。默认把底图陆地沉入海色，
@@ -293,6 +302,7 @@ function computeLabelChars() {
   for (const t of territories) add(zhCountry(t.feature.properties.cntry_name) || t.feature.properties.cntry_name);
   if (rivers) for (const f of rivers.features) add(zh(RIVER_ZH, f.properties?.name || ''));
   if (mountains) for (const f of mountains.features) add(zh(MOUNTAIN_ZH, f.properties?.name || ''));
+  for (const d of DYNASTIES) { add(d.name); add(d.capital); } // 中国模式朝代名/都城名
   labelChars = [...s];
 }
 
@@ -335,9 +345,90 @@ function buildTerritoryLabelLayer() {
   });
 }
 
+// ---- 中国历代疆域模式图层 ----
+function buildChinaTerritoryLayer() {
+  const d = getDynastyAtYear(currentYear);
+  if (!d || !chinaDynasties) return null;
+  const feat = chinaDynasties.find((f) => f.properties.id === d.id);
+  if (!feat) return null;
+  return new GeoJsonLayer({
+    id: 'china-territory',
+    data: feat,
+    getFillColor: [178, 84, 58, 235], // 朱红（历史感）
+    getLineColor: [80, 30, 20, 230],
+    getLineWidth: 1.2,
+    lineWidthMinPixels: 0.8,
+    stroked: true,
+    filled: true,
+    pickable: true,
+    autoHighlight: true,
+    highlightColor: [255, 255, 255, 60],
+    onClick: () => {
+      chinaInfoOpen = true;
+      if (panel) panel.showChinaInfo(d);
+    },
+  });
+}
+
+function buildChinaCapitalLayer() {
+  const d = getDynastyAtYear(currentYear);
+  if (!d) return [];
+  const layers = [
+    new ScatterplotLayer({
+      id: 'china-capital',
+      data: [{ coords: d.capitalCoord }],
+      getPosition: (o) => o.coords,
+      radiusUnits: 'pixels',
+      getRadius: 5.5,
+      radiusMinPixels: 4,
+      getFillColor: [220, 30, 30, 240],
+      stroked: true,
+      getLineColor: [255, 255, 255, 220],
+      lineWidthMinPixels: 1,
+      pickable: true,
+      onClick: () => {
+        chinaInfoOpen = true;
+        if (panel) panel.showChinaInfo(d);
+      },
+    }),
+    new TextLayer({
+      id: 'china-capital-label',
+      data: [{ coords: d.capitalCoord, text: d.capital }],
+      getPosition: (o) => o.coords,
+      getText: (o) => o.text,
+      getSize: 13,
+      getColor: [120, 20, 20, 255],
+      getPixelOffset: [0, -10],
+      fontFamily: 'Microsoft YaHei, sans-serif',
+      fontWeight: 700,
+      fontSettings: { sdf: true, fontSize: 128, buffer: 8 },
+      characterSet: labelChars,
+      pickable: false,
+    }),
+  ];
+  return layers;
+}
+
 function updateLayers() {
   if (!deckOverlay) return;
   const layers = [];
+  if (mode === 'china') {
+    // 中国历代疆域：朝代疆域 + 都城，河流/山脉/湖泊作背景（按面板开关）
+    if (layersState.territory) {
+      const t = buildChinaTerritoryLayer();
+      if (t) layers.push(t);
+      layers.push(...buildChinaCapitalLayer());
+    }
+    if (layersState.river && rivers) layers.push(...buildRiverLayer());
+    if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
+    if (layersState.lake && lakes) {
+      const l = buildLakeLayer();
+      if (l) layers.push(l);
+    }
+    deckOverlay.setProps({ layers });
+    return;
+  }
+  // 世界模式（原有逻辑）
   if (layersState.territory) {
     layers.push(buildTerritoryLayer());
     const lbl = buildTerritoryLabelLayer();
@@ -356,8 +447,11 @@ function updateLayers() {
   deckOverlay.setProps({ layers });
 }
 
+function fmtYear(y) {
+  return y < 0 ? `前${-y}` : `${y}`;
+}
 function updateYearLabel() {
-  document.getElementById('year-display').textContent = currentYear;
+  document.getElementById('year-display').textContent = fmtYear(currentYear);
 }
 
 function addOverlayOnce() {
@@ -420,6 +514,56 @@ async function loadLakes() {
   }
 }
 
+// ---- 中国历代疆域模式：数据加载 / 事件内容 / 模式切换 ----
+async function loadChina() {
+  try {
+    const res = await fetch('./data/china_dynasties.geojson');
+    if (res.ok) {
+      const gj = await res.json();
+      chinaDynasties = gj.features || [];
+      console.info(`[china] 已加载 ${chinaDynasties.length} 个朝代疆域`);
+    } else {
+      console.warn('[china] 未找到 china_dynasties.geojson（请先运行 node scripts/gen-china.mjs）');
+    }
+  } catch (e) {
+    console.warn('[china] 加载失败（可选）：', e.message);
+  }
+}
+
+// 年份事件内容（供时间轴年份读数点击）：世界模式=世界大事，中国模式=朝代信息
+function getYearEvents(y) {
+  if (mode === 'china') {
+    const d = getDynastyAtYear(y);
+    if (!d) return { title: `📜 ${fmtYear(y)} · 暂无对应朝代`, items: [] };
+    const items = [{ t: `都城：${d.capital}`, d: d.desc }];
+    for (const e of d.events || []) items.push({ t: `${fmtYear(e.year)} ${e.title}`, d: e.desc });
+    return { title: `📜 ${fmtYear(y)} · ${d.name}朝（${fmtYear(d.start)} – ${fmtYear(d.end)}）`, items };
+  }
+  return { title: `🌍 ${fmtYear(y)} 年 · 世界大事`, items: getWorldEvents(y) };
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('mode-world')?.classList.toggle('active', m === 'world');
+  document.getElementById('mode-china')?.classList.toggle('active', m === 'china');
+  chinaInfoOpen = false;
+  const info = document.getElementById('info');
+  if (info) info.classList.add('hidden');
+  const ie = document.getElementById('info-events');
+  if (ie) { ie.classList.add('hidden'); ie.innerHTML = ''; }
+  if (m === 'china') {
+    currentYear = CHINA_MIN;
+    if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
+    map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
+  } else {
+    currentYear = 1960;
+    if (timeline) timeline.setRange(YEAR_MIN, YEAR_MAX, currentYear);
+    map?.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 });
+  }
+  updateYearLabel();
+  updateLayers();
+}
+
 // 缩放事件：节流刷新图层（山脉/河流标签随缩放出现/隐藏）。
 // 注意：时间粒度不再随缩放联动，改由时间轴的"步长"下拉框控制。
 let zoomScheduled = false;
@@ -473,11 +617,17 @@ async function init() {
       min: YEAR_MIN,
       max: YEAR_MAX,
       value: currentYear,
+      getYearEvents,
       onYear: (y) => {
         currentYear = y;
         updateYearLabel();
         updateLayers();
-        if (panel && panel.rerender) panel.rerender(); // 年份变化→事件板块按"截至当前年份"实时过滤
+        if (mode === 'china') {
+          // 中国模式：拖动年份时若信息卡打开，则刷新为该年所属朝代
+          if (chinaInfoOpen && panel) panel.showChinaInfo(getDynastyAtYear(y));
+        } else if (panel && panel.rerender) {
+          panel.rerender(); // 年份变化→事件板块按"截至当前年份"实时过滤
+        }
       },
     });
     panel = createPanel({
@@ -493,6 +643,10 @@ async function init() {
       },
       onReset: () => map.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 }),
     });
+    // 世界/中国模式切换
+    document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
+    document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));
+    loadChina().then(() => { if (mode === 'china') updateLayers(); }); // 后台加载中国疆域
     updateYearLabel();
     updateLayers();
 

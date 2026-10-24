@@ -132,6 +132,46 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
       lastProps = props;
       render(props);
     },
+    // 中国历代疆域模式：展示朝代详情卡（起止/都城/简介/大事）
+    showChinaInfo(d) {
+      if (!d) {
+        info.classList.add('hidden');
+        hideEvents();
+        lastProps = null;
+        return;
+      }
+      const fy = (y) => (y < 0 ? `前${-y}` : `${y}`);
+      lastProps = null; // 朝代卡不参与世界模式的 rerender
+      const name = document.getElementById('info-name');
+      const body = document.getElementById('info-body');
+      name.textContent = `${d.name}朝（${fy(d.start)} – ${fy(d.end)}）`;
+      body.innerHTML =
+        `<div><span class="k">起止：</span>${fy(d.start)} – ${fy(d.end)}</div>` +
+        `<div><span class="k">都城：</span>${d.capital}</div>` +
+        `<div><span class="k">简介：</span>${d.desc}</div>`;
+      info.classList.remove('hidden');
+      if (infoEvents) {
+        const evs = (d.events || []).slice().sort((a, b) => a.year - b.year);
+        if (evs.length) {
+          const items = evs
+            .map(
+              (e) =>
+                `<li><span class="ev-year">${fy(e.year)}</span>` +
+                `<span class="ev-main"><span class="ev-title">${e.title}</span>` +
+                (e.desc ? `<span class="ev-desc">${e.desc}</span>` : '') +
+                `</span></li>`
+            )
+            .join('');
+          infoEvents.innerHTML =
+            `<div class="ev-head">📜 ${d.name}朝 · 重大事件<br/>` +
+            `<span class="ev-sub">共 ${evs.length} 条</span></div>` +
+            `<ul class="ev-list">${items}</ul>`;
+          infoEvents.classList.remove('hidden');
+        } else {
+          hideEvents();
+        }
+      }
+    },
     // 年份或中英文切换后，刷新当前打开的卡片（简介 + 事件板块同步）
     rerender() {
       if (lastProps) render(lastProps);

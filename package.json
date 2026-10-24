@@ -13,7 +13,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "fetch-data": "node scripts/fetch-data.mjs"
+    "fetch-data": "node scripts/fetch-data.mjs",
+    "gen-china": "node scripts/gen-china.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.0.38",

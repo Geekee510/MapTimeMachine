@@ -1,11 +1,13 @@
 // 时间轴控件：滑块 + 播放/暂停 + 速度/步长下拉(1×/2×/5×/10×) + 步进按钮。
 // 同一个下拉框同时控制播放速度与时间粒度（步长=下拉框取值年/步），二者同步，
 // 不再随地图缩放变化。
-// 右侧年份读数可点击：点击 → 弹出当前年份“世界大事”浮层；再次点击 → 浮层消失。
+// 右侧年份读数可点击：点击 → 弹出当前年份事件浮层；再次点击 → 浮层消失。
 // 年份变化（拖动滑块/步进/播放）时浮层自动关闭，避免内容与年份错位。
+// setRange(min,max,value)：供“世界/中国”模式切换时改变时间轴范围。
+// getYearEvents(year)：外部提供“某年份事件内容”（世界模式=世界大事，中国模式=朝代信息）。
 import { getWorldEvents } from '../data/worldEvents.js';
 
-export function createTimeline({ min, max, value, onYear, onPlayToggle }) {
+export function createTimeline({ min, max, value, onYear, onPlayToggle, getYearEvents }) {
   const slider = document.getElementById('year-slider');
   const playBtn = document.getElementById('play-btn');
   const speedSel = document.getElementById('speed-select');
@@ -24,8 +26,11 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle }) {
   // 时间粒度（步长，年/步）= 下拉框当前取值；与播放速度共用同一控件
   let currentStep = speedSel ? parseInt(speedSel.value, 10) || 1 : 1;
 
-  // 世界大事浮层当前展示的年份（null 表示关闭）
+  // 世界大事/朝代浮层当前展示的年份（null 表示关闭）
   let worldBoxYear = null;
+
+  // 年份格式化：负年份显示为“前N”
+  const fmtYear = (y) => (y < 0 ? `前${-y}` : `${y}`);
 
   function closeWorldBox() {
     if (worldBox) worldBox.classList.add('hidden');
@@ -35,18 +40,21 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle }) {
 
   function openWorldBox(y) {
     if (!worldBox) return;
-    const evs = getWorldEvents(y);
-    let html = `<div class="we-head">🌍 ${y} 年 · 世界大事</div>`;
-    if (evs.length) {
+    // 事件内容由外部提供；未提供则回退到世界大事
+    let info = getYearEvents ? getYearEvents(y) : null;
+    if (!info) info = { title: `🌍 ${fmtYear(y)} 年 · 世界大事`, items: getWorldEvents(y) };
+    const items = info.items || [];
+    let html = `<div class="we-head">${info.title}</div>`;
+    if (items.length) {
       html += '<ul class="we-list">';
-      for (const e of evs) {
+      for (const e of items) {
         html += `<li><div class="we-title">${e.t}</div>${e.d ? `<div class="we-desc">${e.d}</div>` : ''}</li>`;
       }
       html += '</ul>';
     } else {
-      html += '<div class="we-empty">该年份暂无收录世界大事</div>';
+      html += '<div class="we-empty">该年份暂无收录内容</div>';
     }
-    html += '<div class="we-foot">公开史料概要 · 再次点击年份可关闭</div>';
+    html += '<div class="we-foot">再次点击年份可关闭</div>';
     worldBox.innerHTML = html;
     worldBox.classList.remove('hidden');
     if (readout) readout.classList.add('world-active');
@@ -56,8 +64,18 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle }) {
   function setYear(y) {
     y = Math.max(min, Math.min(max, y));
     slider.value = y;
-    readout.textContent = y;
+    readout.textContent = fmtYear(y);
     onYear(y);
+  }
+
+  // 动态改变时间轴范围（模式切换时调用），并关闭浮层
+  function setRange(newMin, newMax, newValue) {
+    min = newMin;
+    max = newMax;
+    slider.min = min;
+    slider.max = max;
+    closeWorldBox();
+    setYear(newValue);
   }
 
   // 下拉框变化 → 同步更新步长（速度由 startInterval 实时读取，无需缓存）
@@ -67,10 +85,10 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle }) {
     });
   }
 
-  // 年份读数可点击：点击展示当前年份世界大事，再次点击消失（toggle）
+  // 年份读数可点击：点击展示当前年份事件，再次点击消失（toggle）
   if (readout) {
     readout.classList.add('clickable');
-    readout.title = '点击查看该年份世界大事';
+    readout.title = '点击查看该年份事件';
     readout.addEventListener('click', () => {
       const y = parseInt(slider.value, 10);
       if (worldBoxYear !== null && worldBoxYear === y) {
@@ -116,7 +134,7 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle }) {
     playBtn.textContent = playing ? '⏸ 暂停' : '▶ 播放';
     if (onPlayToggle) onPlayToggle(playing);
     if (playing) {
-      closeWorldBox(); // 播放时年份连续变化，先关掉大事浮层
+      closeWorldBox(); // 播放时年份连续变化，先关掉浮层
       let y = parseInt(slider.value, 10);
       if (y >= max) setYear(min); // 已到末尾则从头开始
       startInterval();
@@ -132,5 +150,5 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle }) {
     }
   });
 
-  return { setYear };
+  return { setYear, setRange, fmtYear };
 }

@@ -3,7 +3,9 @@
 一个**公益学术、公开数据、2D 平面**的世界地理历史动态可视化项目（MVP / 先期验证版）。
 在同一张地图上叠加**历史疆域变迁**、**河流 / 山脉 / 湖泊**自然地理要素，配一条 **1886–2023 年的时间轴**，可拖动、可播放、可步进，并支持中英文标签切换。
 
-> 定位：公益学术 + 开放数据起步；2D 平面；先期验证。后续可扩展中国专题（CHGIS）、PMTiles 矢量瓦片部署、地形渲染等。
+支持 **世界地图 / 中国历代疆域** 两种模式切换：中国模式按朝代（秦—清，前221–1912）展示疆域演变与都城变迁，点击疆域或都城查看朝代详情，点击时间轴年份读数查看该年所属朝代大事。
+
+> 定位：公益学术 + 开放数据起步；2D 平面；先期验证。中国历代疆域目前为基于现代省界的**示意性近似**，后续可升级为 CHGIS / 谭其骧《中国历史地图集》矢量化数据；并规划 PMTiles 矢量瓦片部署、地形渲染等。
 
 ---
 
@@ -59,6 +61,10 @@ npm install
 #    CShapes 2.1 历史疆域数据已随仓库提供，无需此步
 npm run fetch-data
 
+# 3b.（可选）重新生成中国历代疆域数据（朝代疆域，依据 DataV 省界拼接）
+#    依赖 public/data/china_provinces.geojson（DataV 省界，已随仓库）
+npm run gen-china
+
 # 4. 本地开发（默认 http://localhost:5173）
 npm run dev
 
@@ -83,8 +89,11 @@ npm run preview
 | `ne_mountains.geojson` | Natural Earth 10m 山脉 / 高原（取质心成点） | Public Domain | 随仓库 / `npm run fetch-data` |
 | `ne_lakes.geojson` | Natural Earth 50m 湖泊 | Public Domain | 随仓库 / `npm run fetch-data` |
 | `cshapes-2.1.geojson` | CShapes 2.1 历史疆域 | **CC BY-NC-SA 4.0（非商业）** | 随仓库提供 |
+| `china_provinces.geojson` | 阿里云 DataV.GeoAtlas 省级行政区划边界 | DataV 使用条款（学习 / 公益，禁商用转售） | 随仓库 / `npm run gen-china` 前置 |
+| `china_dynasties.geojson` | 依据上表按朝代拼接生成的疆域多边形 | 同上（**示意性近似**疆域） | `npm run gen-china` 生成 |
 
 `scripts/fetch-data.mjs` 会从 GitHub raw（jsDelivr 兜底）拉取 Natural Earth 数据并做字段裁剪。
+中国历代疆域（`china_dynasties.geojson`）由 `scripts/gen-china.mjs` 依据 DataV 省级边界、按各朝代省份关键词拼接而成（无外部依赖，坐标降精度到 2 位小数）；**疆域为示意性近似，非精确历史边界**。中国省级边界数据来源：阿里云 DataV.GeoAtlas。
 
 ---
 
@@ -139,6 +148,7 @@ MapTimeMachine/
 - **数据**：
   - CShapes 2.1：CC BY-NC-SA 4.0（**非商业用途**，需署名与相同方式共享，来源 cshapes.org）。本仓库随附该数据仅用于公益学术展示与本地研究；若用于商业用途，请自行从 cshapes.org 获取授权。
   - Natural Earth：Public Domain（公共领域，可自由使用）。
+  - 阿里云 DataV.GeoAtlas（中国省级边界）：来源公开，仅用于学习 / 公益展示，禁止商用或转售（详见 DataV 使用条款）。
 
 请在使用时遵守对应数据的许可条款；本项目为公益学术先期验证，不用于商业盈利。
 
@@ -146,7 +156,7 @@ MapTimeMachine/
 
 ## 八、后续规划（Roadmap）
 
-- 中国专题分支（CHGIS：秦—清 疆域变迁、先秦 / 春秋战国 / 近现代 / 红军历史等）
+- 中国历代疆域精确化（替换为 CHGIS / 谭其骧《中国历史地图集》矢量化数据）；补充先秦 / 春秋战国 / 近现代等细分阶段
 - PMTiles 矢量瓦片化与 Linux 生产部署
 - 山脉范围多边形 / 地形渲染（DEM）替代当前质心点
 - 首都中文译名库、战争 / 民族 / 探索等更多时空维度
