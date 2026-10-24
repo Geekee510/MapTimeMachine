@@ -564,6 +564,7 @@ function setMode(m) {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
     map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
+    if (panel) panel.showChinaOverview(); // 中国模式：信息框自动切换为“中国介绍”
   } else {
     currentYear = 1960;
     if (timeline) timeline.setRange(YEAR_MIN, YEAR_MAX, currentYear);

@@ -3,6 +3,36 @@
 import { zhCountry, zh, bilingual, RIVER_ZH, MOUNTAIN_ZH } from '../data/i18n.js';
 import { getEvents } from '../data/events.js';
 
+// 国旗 emoji（按 CShapes 英文国名；历史政权去括号后回退到继承国国旗）
+const FLAGS = {
+  'China': '🇨🇳', 'United States of America': '🇺🇸', 'Russia': '🇷🇺',
+  'Russia (Soviet Union)': '🇷🇺', 'United Kingdom': '🇬🇧', 'France': '🇫🇷',
+  'Germany': '🇩🇪', 'Germany (Prussia)': '🇩🇪', 'Japan': '🇯🇵', 'India': '🇮🇳',
+  'Italy': '🇮🇹', 'Spain': '🇪🇸', 'Portugal': '🇵🇹', 'Netherlands': '🇳🇱',
+  'Belgium': '🇧🇪', 'Switzerland': '🇨🇭', 'Austria': '🇦🇹', 'Austria-Hungary': '🇦🇹',
+  'Poland': '🇵🇱', 'Czech Republic': '🇨🇿', 'Czechoslovakia': '🇨🇿', 'Hungary': '🇭🇺',
+  'Romania': '🇷🇴', 'Greece': '🇬🇷', 'Sweden': '🇸🇪', 'Norway': '🇳🇴',
+  'Denmark': '🇩🇰', 'Finland': '🇫🇮', 'Ireland': '🇮🇪', 'Iceland': '🇮🇸',
+  'Turkey': '🇹🇷', 'Turkey (Ottoman Empire)': '🇹🇷', 'Iran': '🇮🇷', 'Iraq': '🇮🇶',
+  'Saudi Arabia': '🇸🇦', 'Egypt': '🇪🇬', 'Israel': '🇮🇱', 'Syria': '🇸🇾',
+  'Afghanistan': '🇦🇫', 'Pakistan': '🇵🇰', 'Bangladesh': '🇧🇩',
+  'Sri Lanka': '🇱🇰', 'Nepal': '🇳🇵', 'Myanmar': '🇲🇲', 'Thailand': '🇹🇭',
+  'Vietnam': '🇻🇳', 'Vietnam (Annam/Cochin China/Tonkin)': '🇻🇳', 'Malaysia': '🇲🇾',
+  'Indonesia': '🇮🇩', 'Philippines': '🇵🇭', 'Korea': '🇰🇷', 'Korea, Republic of': '🇰🇷',
+  'Mongolia': '🇲🇳', 'Kazakhstan': '🇰🇿', 'Ukraine': '🇺🇦', 'Brazil': '🇧🇷',
+  'Argentina': '🇦🇷', 'Chile': '🇨🇱', 'Peru': '🇵🇪', 'Colombia': '🇨🇴',
+  'Venezuela': '🇻🇪', 'Bolivia': '🇧🇴', 'Mexico': '🇲🇽', 'Cuba': '🇨🇺',
+  'Canada': '🇨🇦', 'Australia': '🇦🇺', 'New Zealand': '🇳🇿', 'South Africa': '🇿🇦',
+  'Nigeria': '🇳🇬', 'Kenya': '🇰🇪', 'Ethiopia': '🇪🇹', 'Morocco': '🇲🇦',
+  'Algeria': '🇩🇿', 'Libya': '🇱🇾', 'Sudan': '🇸🇩', 'Ghana': '🇬🇭',
+};
+function flagOf(enName) {
+  if (!enName) return '';
+  if (FLAGS[enName]) return FLAGS[enName];
+  const base = String(enName).replace(/\s*\([^)]*\)\s*$/, '').trim(); // 去括号后缀
+  return FLAGS[base] || '';
+}
+
 export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tRiver = document.getElementById('toggle-river');
@@ -97,7 +127,8 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
     }
     const enName = props.cntry_name || '未知政权';
     const cnName = zhCountry(enName);
-    name.textContent = bilingual(cnName, enName);
+    const flag = flagOf(enName);
+    name.textContent = (flag ? `${flag} ` : '') + bilingual(cnName, enName);
 
     const st = STATUS_LABEL[props.status] || ['其他', '#999'];
     const rows = [];
@@ -128,6 +159,38 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
   }
 
   return {
+    // 中国模式：自动展示“中国介绍”总览卡（名称/简介 + 中国重大历史事件）
+    showChinaOverview() {
+      lastProps = null;
+      const name = document.getElementById('info-name');
+      const body = document.getElementById('info-body');
+      name.textContent = '🇨🇳 中国（China）';
+      body.innerHTML =
+        `<div><span class="k">类型：</span><span class="status-tag" style="background:#c84646">文明古国 / 统一多民族国家</span></div>` +
+        `<div><span class="k">简介：</span>中华文明发源于黄河、长江流域，延续五千年；历夏商周、秦汉、隋唐、宋元、明清至近现代，形成统一多民族国家。</div>`;
+      info.classList.remove('hidden');
+      if (infoEvents) {
+        const evs = getEvents('China').slice().sort((a, b) => a.year - b.year);
+        if (evs.length) {
+          const items = evs
+            .map(
+              (e) =>
+                `<li><span class="ev-year">${e.year}</span>` +
+                `<span class="ev-main"><span class="ev-title">${e.title}</span>` +
+                (e.desc ? `<span class="ev-desc">${e.desc}</span>` : '') +
+                `</span></li>`
+            )
+            .join('');
+          infoEvents.innerHTML =
+            `<div class="ev-head">📜 中国 · 重大历史事件<br/>` +
+            `<span class="ev-sub">共 ${evs.length} 条</span></div>` +
+            `<ul class="ev-list">${items}</ul>`;
+          infoEvents.classList.remove('hidden');
+        } else {
+          hideEvents();
+        }
+      }
+    },
     showInfo(props) {
       lastProps = props;
       render(props);
