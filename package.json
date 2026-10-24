@@ -16,7 +16,9 @@
     "fetch-data": "node scripts/fetch-data.mjs",
     "gen-china": "node scripts/gen-china.mjs",
     "gen-china-regions": "node scripts/gen-china-regions.mjs",
-    "gen-china-outline": "node scripts/gen-china-outline.mjs"
+    "gen-china-outline": "node scripts/gen-china-outline.mjs",
+    "gen-china-preqin": "node scripts/gen-china-preqin.mjs",
+    "check-i18n": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.0.38",

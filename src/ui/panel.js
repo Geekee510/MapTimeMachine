@@ -2,6 +2,7 @@
 // CShapes 真实字段：cntry_name / capname / area / gwcode / gwsyear / gweyear / status
 import { zhCountry, zh, bilingual, RIVER_ZH, MOUNTAIN_ZH } from '../data/i18n.js';
 import { getEvents } from '../data/events.js';
+import { statesAtYear } from '../data/china.js';
 
 // 国旗图片（flag-icons SVG，MIT）：按 CShapes 英文国名 → ISO 3166-1 alpha-2 小写代码。
 // 历史政权去括号后回退到继承国代码。info-name 用 <img> 渲染（Windows 不支持 emoji 旗帜字形）。
@@ -251,7 +252,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
       closeInfo();
     },
     // 中国历代疆域模式：展示朝代详情卡（起止/都城/简介/大事）；state=战国政权名（可选）
-    showChinaInfo(d, state) {
+    showChinaInfo(d, state, year) {
       if (!d) {
         info.classList.add('hidden');
         hideEvents();
@@ -262,14 +263,17 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
       lastProps = null; // 朝代卡不参与世界模式的 rerender
       const name = document.getElementById('info-name');
       const body = document.getElementById('info-body');
-      const st = state ? d.states?.find((s) => s.name === state) : null;
+      // 政权按年份取（同一政权名可能有多段，如辽 1115 前后、蒙古逐年南下）
+      const live = year == null ? (d.states || []) : statesAtYear(d, year);
+      const st = state ? live.find((s) => s.name === state) : null;
       const cap = st ? (st.capital || state) : d.capital;
       const desc = (st && st.desc) || d.desc;
+      const span = st && st.start != null ? `${fy(st.start)} – ${fy(st.end)}` : `${fy(d.start)} – ${fy(d.end)}`;
       name.textContent = state
-        ? `${state} · ${d.name}（${fy(d.start)} – ${fy(d.end)}）`
-        : `${d.name}（${fy(d.start)} – ${fy(d.end)}）`;
+        ? `${state} · ${d.name}（${span}）`
+        : `${d.name}（${span}）`;
       body.innerHTML =
-        `<div><span class="k">起止：</span>${fy(d.start)} – ${fy(d.end)}</div>` +
+        `<div><span class="k">起止：</span>${span}</div>` +
         `<div><span class="k">都城：</span>${cap}</div>` +
         `<div><span class="k">简介：</span>${desc}</div>`;
       info.classList.remove('hidden');

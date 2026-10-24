@@ -5,7 +5,7 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { loadCShapes } from './data/loaders.js';
 import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.js';
-import { DYNASTIES, getDynastyAtYear } from './data/china.js';
+import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
 import { createPanel } from './ui/panel.js';
@@ -184,6 +184,41 @@ function buildTerritoryLayer() {
 }
 
 // ---- historical-basemaps：1886 年前的世界疆域 ----
+
+// 判断一个名字是否代表"政权/国家"，而非族群、考古文化或部落。
+// historical-basemaps 覆盖全球原住民族群，其色块不是政治实体，直接显示会造成
+// 严重误导（典型：公元前 2000 年的 Thai 色块横跨中国南方）。
+const NON_POLITY_PATTERNS = [
+  /\b(hunter|hunters|hunter-foragers|gatherer|gatherers|forager|foragers|farmer|farmers|farming|nomad|nomads|nomadic|pastoral|pastoralists)\b/i,
+  /\b(tribe|tribes|tribal|peoples?|culture|cultures|civilization|civilisation|chiefdom|chiefdoms|society|societies)\b/i,
+  /\b(hunter-gatherer|hunter gatherer|neolithic|mesolithic|paleolithic|bronze age|iron age|stone age)\b/i,
+  /\b(clan|clans|band|bands|horde|confederacy of)\b/i,
+  /\(?(indigenous|native|aboriginal|first nations)\)?/i,
+];
+// 明确的族群/语族名（这些是民族而非国家）
+const NON_POLITY_EXACT = new Set([
+  'Thai', 'Tai', 'Koreans', 'Chinese', 'Japanese', 'Tibetans', 'Uyghurs', 'Uyghur',
+  'Kazakhs', 'Kazakh', 'Uzbeks', 'Uzbek', 'Turkmens', 'Turkmen', 'Tajiks', 'Tajik',
+  'Kyrgyz', 'Pashtuns', 'Pashtun', 'Sikhs', 'Tamils', 'Sinhalese', 'Burmese',
+  'Vietnamese', 'Khmer', 'Lao', 'Malays', 'Javanese', 'Sundanese', 'Filipinos',
+  'Austronesians', 'Austro-Asiatic rice cultures', 'Tibeto-Burmanese', 'Ainu', 'Ainus',
+  'Jōmon', 'Khoisan', 'Semites', 'Bantu', 'Dravidians', 'Balts', 'Baltic tribes',
+  'Alans', 'Avars', 'Arabs', 'Berbers', 'Berber', 'Slavs', 'Germans', 'Celts', 'Vikings',
+  'Mongols', 'Turks', 'Kurds', 'Bedouins', 'Bedouin', 'Tuareg', 'Maori', 'Inuit', 'Sami',
+  'Afanasevo', 'Andronovo', 'Sintashta', 'Namazga', 'Catacomb culture', 'Beaker',
+  'Únětice', 'Cycladic', 'Anatolian tribes', 'Austro-Asiatic', 'Papuans',
+  'Anglo-Saxons', 'Franks', 'Lombards', 'Vandals', 'Visigoths', 'Ostrogoths', 'Suebi',
+  'Burgundians', 'Alemanni', 'Alamans', 'Saxons', 'Frisians', 'Thuringians', 'Bavarians',
+  'Scythians', 'Sarmatians', 'Huns', 'Magys', 'Magyars', 'Pechenegs', 'Cumans', 'Kipchaks',
+]);
+function isPolityName(name) {
+  const n = (name || '').trim();
+  if (!n || n === '?' || /^\s*$/.test(n)) return false; // 无名色块（含覆盖北半球的背景多边形）
+  if (NON_POLITY_EXACT.has(n)) return false;
+  if (NON_POLITY_PATTERNS.some((re) => re.test(n))) return false;
+  return true;
+}
+
 // 按需从 jsDelivr 拉取对应年代的 GeoJSON（不打包进仓库，避免体积膨胀），
 // 加载后缓存，并预取相邻年代，使拖动时间轴时不卡顿（参考 orbis-chronos 的优化经验）。
 const hbCache = new Map(); // 快照年份 -> features
@@ -200,7 +235,10 @@ async function ensureHb(year) {
     // 快照有效区间：[本快照年份, 下一快照年份 - 1]，最后一个到 CShapes 起始前一年
     const i = HB_YEARS.indexOf(year);
     const endYear = i + 1 < HB_YEARS.length ? HB_YEARS[i + 1] - 1 : CSHAPES_START - 1;
-    const feats = (gj.features || []).map((f) => {
+    // historical-basemaps 把大量「族群 / 考古文化 / 部落」也画成大色块
+    // （如公元前 2000 年的 "Thai" 覆盖 lon 96–122 / lat 20–44，横跨中国南方，
+    //  被误读为"泰国占了中原"）。这类不是政权，过滤掉。
+    const feats = (gj.features || []).filter((f) => isPolityName(f.properties?.NAME)).map((f) => {
       const p = f.properties || {};
       const feat = {
         type: 'Feature',
@@ -511,7 +549,7 @@ function computeLabelChars() {
   if (mountains) for (const f of mountains.features) add(zh(MOUNTAIN_ZH, f.properties?.name || ''));
   for (const d of DYNASTIES) {
     add(d.name); add(d.capital);
-    if (d.states) for (const s of d.states) { add(s.name); add(s.capital); } // 战国政权名/都城
+    if (d.states) for (const s of d.states) { add(s.name); add(s.capital); } // 并立政权名/都城
   }
   for (const v of HB_ZH_VALUES) add(v); // 1886 年前的历史政权译名（如"阿拔斯王朝"）
   labelChars = [...s];
@@ -566,7 +604,12 @@ const STATE_PALETTE = [
 function buildChinaTerritoryLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d || !chinaDynasties) return null;
-  const feats = chinaDynasties.filter((f) => f.properties.id === d.id);
+  // 按年份筛选：并立政权各自带 sStart/sEnd（如辽 907–1125、金 1115–1234），
+  // 这样 1115–1125 年辽金同时呈现，1227 年西夏消失、1234 年后金地归蒙古。
+  const feats = chinaDynasties.filter(
+    (f) => f.properties.id === d.id
+      && (f.properties.sStart == null || (currentYear >= f.properties.sStart && currentYear <= f.properties.sEnd))
+  );
   if (!feats.length) return null;
   // 各政权分色：同一 feature 集合内按 state 名取色
   const names = [...new Set(feats.map((f) => f.properties.state).filter(Boolean))];
@@ -590,12 +633,16 @@ function buildChinaTerritoryLayer() {
     highlightColor: [255, 255, 255, 60],
     onClick: (info) => {
       chinaInfoOpen = true;
-      if (panel) panel.showChinaInfo(d, info.object?.properties?.state);
+      if (panel) panel.showChinaInfo(d, info.object?.properties?.state, currentYear);
     },
   });
 }
 
-// 王朝疆域轮廓层：优先于省界拼接（形状按历史疆域绘制，更接近史实）。
+// 王朝疆域轮廓层（historical-basemaps 的真实王朝多边形）。
+// 【已改为只描边、不填充】此前它与省界拼接层"双层实心叠加"，看起来像凭空多出一个图层：
+//   · 北宋：HB 的 Song Empire 轮廓会整块盖在辽、西夏、大理的分色之上；
+//   · 中华人民共和国：该轮廓缺台湾、西藏等，实心覆盖反而掩盖了我们省界清单里的完整版图。
+// 现在只作为"史实边界参考线"（褐色虚感细线）叠在疆域之上，既不遮挡分色也不缺块。
 // 每个朝代可能有多个年代的轮廓（如清有 1700/1783/1800），取年份最接近当前年份的那个。
 function buildChinaOutlineLayer() {
   const d = getDynastyAtYear(currentYear);
@@ -608,20 +655,12 @@ function buildChinaOutlineLayer() {
   return new GeoJsonLayer({
     id: 'china-outline',
     data: { type: 'FeatureCollection', features: [best] },
-    getFillColor: layersState.relief ? [178, 84, 58, 150] : [178, 84, 58, 235], // 朱红；晕渲时半透明
-    getLineColor: [90, 30, 18, 240],
-    getLineWidth: 1.6,
-    lineWidthMinPixels: 1,
-    updateTriggers: { getFillColor: layersState.relief },
     stroked: true,
-    filled: true,
-    pickable: true,
-    autoHighlight: true,
-    highlightColor: [255, 255, 255, 60],
-    onClick: (info) => {
-      chinaInfoOpen = true;
-      if (panel) panel.showChinaInfo(d, info.object?.properties?.state);
-    },
+    filled: false, // 关键：不再用第二个实心多边形覆盖疆域层
+    getLineColor: [90, 30, 18, 220],
+    getLineWidth: 1.4,
+    lineWidthMinPixels: 1,
+    pickable: false,
   });
 }
 
@@ -656,11 +695,17 @@ function buildChinaRegionLayer() {
 function buildChinaCapitalLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d) return [];
-  const points = d.states
-    ? d.states.map((s) => ({ coords: s.capitalCoord, text: s.capital, state: s.name }))
-    : d.capitalCoord
-      ? [{ coords: d.capitalCoord, text: d.capital, state: null }]
-      : [];
+  // 按年份取当朝政权（同名政权去重：如两条"秦"/"蒙古"只画一个都城点）
+  const seen = new Set();
+  const points = [];
+  for (const s of statesAtYear(d, currentYear)) {
+    if (seen.has(s.name) || !s.capitalCoord) continue;
+    seen.add(s.name);
+    points.push({ coords: s.capitalCoord, text: s.capital, state: s.name });
+  }
+  if (!points.length && d.capitalCoord) {
+    points.push({ coords: d.capitalCoord, text: d.capital, state: null });
+  }
   if (!points.length) return [];
   const layers = [
     new ScatterplotLayer({
@@ -677,7 +722,7 @@ function buildChinaCapitalLayer() {
       pickable: true,
       onClick: (info) => {
         chinaInfoOpen = true;
-        if (panel) panel.showChinaInfo(d, info.object?.state);
+        if (panel) panel.showChinaInfo(d, info.object?.state, currentYear);
       },
     }),
     new TextLayer({
@@ -704,14 +749,13 @@ function updateLayers() {
   if (mode === 'china') {
     // 中国历代疆域：朝代疆域 + 都城，河流/山脉/湖泊作背景（按面板开关）
     if (layersState.territory) {
-      // 疆域填充：优先用 historical-basemaps 的王朝轮廓（更接近史实），
-      // 无轮廓的朝代（秦/三国/两晋/南北朝/隋/五代/南宋/民国）回落省界拼接底图
+      // 疆域填充：省界拼接底图【始终绘制】（台湾 / 西藏 / 外蒙古等在我们自己维护的
+      // 省份清单里，historical-basemaps 的王朝轮廓常缺这些地区，早期版本用轮廓
+      // “替代”底图导致台湾、西藏长期不显示）；王朝轮廓在其上叠加，二者取并集。
+      const t = buildChinaTerritoryLayer();
+      if (t) layers.push(t);
       const ol = buildChinaOutlineLayer();
       if (ol) layers.push(ol);
-      else {
-        const t = buildChinaTerritoryLayer();
-        if (t) layers.push(t);
-      }
       layers.push(...buildChinaCapitalLayer());
     }
     if (layersState.region) {
@@ -971,7 +1015,7 @@ async function init() {
         updateLayers();
         if (mode === 'china') {
           // 中国模式：拖动年份时若信息卡打开，则刷新为该年所属朝代
-          if (chinaInfoOpen && panel) panel.showChinaInfo(getDynastyAtYear(y));
+          if (chinaInfoOpen && panel) panel.showChinaInfo(getDynastyAtYear(y), undefined, y);
         } else if (panel) {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
           // 则换成该时段的属性重绘（存续/历时/事件随之更新）；已不存在则清空介绍卡。
