@@ -132,8 +132,8 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
       lastProps = props;
       render(props);
     },
-    // 中国历代疆域模式：展示朝代详情卡（起止/都城/简介/大事）
-    showChinaInfo(d) {
+    // 中国历代疆域模式：展示朝代详情卡（起止/都城/简介/大事）；state=战国政权名（可选）
+    showChinaInfo(d, state) {
       if (!d) {
         info.classList.add('hidden');
         hideEvents();
@@ -144,10 +144,13 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
       lastProps = null; // 朝代卡不参与世界模式的 rerender
       const name = document.getElementById('info-name');
       const body = document.getElementById('info-body');
-      name.textContent = `${d.name}朝（${fy(d.start)} – ${fy(d.end)}）`;
+      const cap = state ? (d.states?.find((s) => s.name === state)?.capital || state) : d.capital;
+      name.textContent = state
+        ? `${state} · ${d.name}（${fy(d.start)} – ${fy(d.end)}）`
+        : `${d.name}（${fy(d.start)} – ${fy(d.end)}）`;
       body.innerHTML =
         `<div><span class="k">起止：</span>${fy(d.start)} – ${fy(d.end)}</div>` +
-        `<div><span class="k">都城：</span>${d.capital}</div>` +
+        `<div><span class="k">都城：</span>${cap}</div>` +
         `<div><span class="k">简介：</span>${d.desc}</div>`;
       info.classList.remove('hidden');
       if (infoEvents) {

@@ -12,7 +12,7 @@ import { createPanel } from './ui/panel.js';
 
 const YEAR_MIN = 1886;
 const YEAR_MAX = 2023;
-const CHINA_MIN = -221;
+const CHINA_MIN = -2070;
 const CHINA_MAX = 1912;
 const WORLD_CENTER = [12, 28];
 const WORLD_ZOOM = 1.4;
@@ -302,7 +302,10 @@ function computeLabelChars() {
   for (const t of territories) add(zhCountry(t.feature.properties.cntry_name) || t.feature.properties.cntry_name);
   if (rivers) for (const f of rivers.features) add(zh(RIVER_ZH, f.properties?.name || ''));
   if (mountains) for (const f of mountains.features) add(zh(MOUNTAIN_ZH, f.properties?.name || ''));
-  for (const d of DYNASTIES) { add(d.name); add(d.capital); } // 中国模式朝代名/都城名
+  for (const d of DYNASTIES) {
+    add(d.name); add(d.capital);
+    if (d.states) for (const s of d.states) { add(s.name); add(s.capital); } // 战国政权名/都城
+  }
   labelChars = [...s];
 }
 
@@ -349,11 +352,11 @@ function buildTerritoryLabelLayer() {
 function buildChinaTerritoryLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d || !chinaDynasties) return null;
-  const feat = chinaDynasties.find((f) => f.properties.id === d.id);
-  if (!feat) return null;
+  const feats = chinaDynasties.filter((f) => f.properties.id === d.id);
+  if (!feats.length) return null;
   return new GeoJsonLayer({
     id: 'china-territory',
-    data: feat,
+    data: { type: 'FeatureCollection', features: feats }, // 战国等多政权并立
     getFillColor: [178, 84, 58, 235], // 朱红（历史感）
     getLineColor: [80, 30, 20, 230],
     getLineWidth: 1.2,
@@ -363,9 +366,9 @@ function buildChinaTerritoryLayer() {
     pickable: true,
     autoHighlight: true,
     highlightColor: [255, 255, 255, 60],
-    onClick: () => {
+    onClick: (info) => {
       chinaInfoOpen = true;
-      if (panel) panel.showChinaInfo(d);
+      if (panel) panel.showChinaInfo(d, info.object?.properties?.state);
     },
   });
 }
@@ -373,10 +376,16 @@ function buildChinaTerritoryLayer() {
 function buildChinaCapitalLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d) return [];
+  const points = d.states
+    ? d.states.map((s) => ({ coords: s.capitalCoord, text: s.capital, state: s.name }))
+    : d.capitalCoord
+      ? [{ coords: d.capitalCoord, text: d.capital, state: null }]
+      : [];
+  if (!points.length) return [];
   const layers = [
     new ScatterplotLayer({
       id: 'china-capital',
-      data: [{ coords: d.capitalCoord }],
+      data: points,
       getPosition: (o) => o.coords,
       radiusUnits: 'pixels',
       getRadius: 5.5,
@@ -386,14 +395,14 @@ function buildChinaCapitalLayer() {
       getLineColor: [255, 255, 255, 220],
       lineWidthMinPixels: 1,
       pickable: true,
-      onClick: () => {
+      onClick: (info) => {
         chinaInfoOpen = true;
-        if (panel) panel.showChinaInfo(d);
+        if (panel) panel.showChinaInfo(d, info.object?.state);
       },
     }),
     new TextLayer({
       id: 'china-capital-label',
-      data: [{ coords: d.capitalCoord, text: d.capital }],
+      data: points,
       getPosition: (o) => o.coords,
       getText: (o) => o.text,
       getSize: 13,
