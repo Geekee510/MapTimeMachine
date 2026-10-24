@@ -3,28 +3,29 @@
 import { zhCountry, zh, bilingual, RIVER_ZH, MOUNTAIN_ZH } from '../data/i18n.js';
 import { getEvents } from '../data/events.js';
 
-// 国旗 emoji（按 CShapes 英文国名；历史政权去括号后回退到继承国国旗）
+// 国旗图片（flag-icons SVG，MIT）：按 CShapes 英文国名 → ISO 3166-1 alpha-2 小写代码。
+// 历史政权去括号后回退到继承国代码。info-name 用 <img> 渲染（Windows 不支持 emoji 旗帜字形）。
 const FLAGS = {
-  'China': '🇨🇳', 'United States of America': '🇺🇸', 'Russia': '🇷🇺',
-  'Russia (Soviet Union)': '🇷🇺', 'United Kingdom': '🇬🇧', 'France': '🇫🇷',
-  'Germany': '🇩🇪', 'Germany (Prussia)': '🇩🇪', 'Japan': '🇯🇵', 'India': '🇮🇳',
-  'Italy': '🇮🇹', 'Spain': '🇪🇸', 'Portugal': '🇵🇹', 'Netherlands': '🇳🇱',
-  'Belgium': '🇧🇪', 'Switzerland': '🇨🇭', 'Austria': '🇦🇹', 'Austria-Hungary': '🇦🇹',
-  'Poland': '🇵🇱', 'Czech Republic': '🇨🇿', 'Czechoslovakia': '🇨🇿', 'Hungary': '🇭🇺',
-  'Romania': '🇷🇴', 'Greece': '🇬🇷', 'Sweden': '🇸🇪', 'Norway': '🇳🇴',
-  'Denmark': '🇩🇰', 'Finland': '🇫🇮', 'Ireland': '🇮🇪', 'Iceland': '🇮🇸',
-  'Turkey': '🇹🇷', 'Turkey (Ottoman Empire)': '🇹🇷', 'Iran': '🇮🇷', 'Iraq': '🇮🇶',
-  'Saudi Arabia': '🇸🇦', 'Egypt': '🇪🇬', 'Israel': '🇮🇱', 'Syria': '🇸🇾',
-  'Afghanistan': '🇦🇫', 'Pakistan': '🇵🇰', 'Bangladesh': '🇧🇩',
-  'Sri Lanka': '🇱🇰', 'Nepal': '🇳🇵', 'Myanmar': '🇲🇲', 'Thailand': '🇹🇭',
-  'Vietnam': '🇻🇳', 'Vietnam (Annam/Cochin China/Tonkin)': '🇻🇳', 'Malaysia': '🇲🇾',
-  'Indonesia': '🇮🇩', 'Philippines': '🇵🇭', 'Korea': '🇰🇷', 'Korea, Republic of': '🇰🇷',
-  'Mongolia': '🇲🇳', 'Kazakhstan': '🇰🇿', 'Ukraine': '🇺🇦', 'Brazil': '🇧🇷',
-  'Argentina': '🇦🇷', 'Chile': '🇨🇱', 'Peru': '🇵🇪', 'Colombia': '🇨🇴',
-  'Venezuela': '🇻🇪', 'Bolivia': '🇧🇴', 'Mexico': '🇲🇽', 'Cuba': '🇨🇺',
-  'Canada': '🇨🇦', 'Australia': '🇦🇺', 'New Zealand': '🇳🇿', 'South Africa': '🇿🇦',
-  'Nigeria': '🇳🇬', 'Kenya': '🇰🇪', 'Ethiopia': '🇪🇹', 'Morocco': '🇲🇦',
-  'Algeria': '🇩🇿', 'Libya': '🇱🇾', 'Sudan': '🇸🇩', 'Ghana': '🇬🇭',
+  'China': 'cn', 'United States of America': 'us', 'Russia': 'ru',
+  'Russia (Soviet Union)': 'ru', 'United Kingdom': 'gb', 'France': 'fr',
+  'Germany': 'de', 'Germany (Prussia)': 'de', 'Japan': 'jp', 'India': 'in',
+  'Italy': 'it', 'Spain': 'es', 'Portugal': 'pt', 'Netherlands': 'nl',
+  'Belgium': 'be', 'Switzerland': 'ch', 'Austria': 'at', 'Austria-Hungary': 'at',
+  'Poland': 'pl', 'Czech Republic': 'cz', 'Czechoslovakia': 'cz', 'Hungary': 'hu',
+  'Romania': 'ro', 'Greece': 'gr', 'Sweden': 'se', 'Norway': 'no',
+  'Denmark': 'dk', 'Finland': 'fi', 'Ireland': 'ie', 'Iceland': 'is',
+  'Turkey': 'tr', 'Turkey (Ottoman Empire)': 'tr', 'Iran': 'ir', 'Iraq': 'iq',
+  'Saudi Arabia': 'sa', 'Egypt': 'eg', 'Israel': 'il', 'Syria': 'sy',
+  'Afghanistan': 'af', 'Pakistan': 'pk', 'Bangladesh': 'bd',
+  'Sri Lanka': 'lk', 'Nepal': 'np', 'Myanmar': 'mm', 'Thailand': 'th',
+  'Vietnam': 'vn', 'Vietnam (Annam/Cochin China/Tonkin)': 'vn', 'Malaysia': 'my',
+  'Indonesia': 'id', 'Philippines': 'ph', 'Korea': 'kr', 'Korea, Republic of': 'kr',
+  'Mongolia': 'mn', 'Kazakhstan': 'kz', 'Ukraine': 'ua', 'Brazil': 'br',
+  'Argentina': 'ar', 'Chile': 'cl', 'Peru': 'pe', 'Colombia': 'co',
+  'Venezuela': 've', 'Bolivia': 'bo', 'Mexico': 'mx', 'Cuba': 'cu',
+  'Canada': 'ca', 'Australia': 'au', 'New Zealand': 'nz', 'South Africa': 'za',
+  'Nigeria': 'ng', 'Kenya': 'ke', 'Ethiopia': 'et', 'Morocco': 'ma',
+  'Algeria': 'dz', 'Libya': 'ly', 'Sudan': 'sd', 'Ghana': 'gh',
 };
 function flagOf(enName) {
   if (!enName) return '';
@@ -128,7 +129,14 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
     const enName = props.cntry_name || '未知政权';
     const cnName = zhCountry(enName);
     const flag = flagOf(enName);
-    name.textContent = (flag ? `${flag} ` : '') + bilingual(cnName, enName);
+    name.textContent = bilingual(cnName, enName);
+    if (flag) {
+      const img = document.createElement('img');
+      img.className = 'flag';
+      img.src = `flags/${flag}.svg`;
+      img.alt = flag;
+      name.prepend(img);
+    }
 
     const st = STATUS_LABEL[props.status] || ['其他', '#999'];
     const rows = [];
@@ -164,7 +172,12 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo }) {
       lastProps = null;
       const name = document.getElementById('info-name');
       const body = document.getElementById('info-body');
-      name.textContent = '🇨🇳 中国（China）';
+      name.textContent = '中国（China）';
+      const cnFlag = document.createElement('img');
+      cnFlag.className = 'flag';
+      cnFlag.src = 'flags/cn.svg';
+      cnFlag.alt = 'cn';
+      name.prepend(cnFlag);
       body.innerHTML =
         `<div><span class="k">类型：</span><span class="status-tag" style="background:#c84646">文明古国 / 统一多民族国家</span></div>` +
         `<div><span class="k">简介：</span>中华文明发源于黄河、长江流域，延续五千年；历夏商周、秦汉、隋唐、宋元、明清至近现代，形成统一多民族国家。</div>`;

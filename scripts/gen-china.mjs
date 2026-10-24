@@ -58,17 +58,21 @@ for (const d of DYNASTIES) {
     });
     console.log(`${d.name}\t${d.start}~${d.end}\t手绘示意疆域`);
   } else {
-    // 秦以后：拼接现代省界
-    const polygons = [];
+    // 秦以后：每个匹配省份作为【独立 feature】（而非拼成单个大 MultiPolygon）。
+    // 原因：deck.gl 对整个 160 块 MultiPolygon 用 even-odd 填充时，相邻/重叠省界
+    // 会被判成“洞”，导致西藏/新疆等整块空白；拆成每省一 feature 可逐省三角化，规避此问题。
+    let n = 0;
     for (const kw of d.provinces || []) {
-      for (const f of matchProvinces(kw)) polygons.push(...toPolygons(f.geometry));
+      for (const f of matchProvinces(kw)) {
+        out.features.push({
+          type: 'Feature',
+          properties: { ...base },
+          geometry: { type: f.geometry.type, coordinates: roundCoords(f.geometry.coordinates) },
+        });
+        n++;
+      }
     }
-    out.features.push({
-      type: 'Feature',
-      properties: { ...base },
-      geometry: { type: 'MultiPolygon', coordinates: roundCoords(polygons) },
-    });
-    console.log(`${d.name}\t${d.start}~${d.end}\t拼接省份几何 ${polygons.length} 块`);
+    console.log(`${d.name}\t${d.start}~${d.end}\t${n} 个独立省要素`);
   }
 }
 
