@@ -105,7 +105,7 @@ npm run preview
 
 ## 四、数据说明（重要）
 
-为便于一键部署与「克隆即运行」，本仓库已将 `public/data/` 下的所有 `.geojson` 数据**随仓库提交**（含 CShapes 2.1 历史疆域 26MB）。如本地数据损坏，仍可用 `npm run fetch-data` 重新生成 Natural Earth 三类数据（CShapes 需另行从 cshapes.org 获取或已在仓库中）。
+为便于一键部署与「克隆即运行」，`main` 分支已将 `public/data/` 下的所有 `.geojson` 数据**随仓库提交**（含 CShapes 2.1 历史疆域 26MB）；**开发分支 `dev/data-upgrade` 为精简体积不再包含 CShapes（约 26MB），详见下方「开发分支数据说明」**。如本地数据损坏，仍可用 `npm run fetch-data` 重新生成 Natural Earth 三类数据（CShapes 需另行从 cshapes.org 获取或已在 main 分支中）。
 
 | 文件 | 来源 | 许可 | 获取方式 |
 | --- | --- | --- | --- |
@@ -119,6 +119,15 @@ npm run preview
 | `china_regions.geojson` | 由上者生成：2165 个政区单元，按 `beg`–`end` 逐年过滤（只描边不填充） | 同上 | `npm run gen-china-regions` |
 | `china_outline.geojson` | 汉 / 唐 / 宋 / 元 / 明 / 清 / 现代**真实王朝轮廓**（含西域、外蒙古），15 个要素 | **CC BY-SA 4.0** | `npm run gen-china-outline`（CDN 拉取） |
 | `world_YYYY.geojson`（前3000–1886） | historical-basemaps 年代快照 | **CC BY-SA 4.0** | **运行时按需从 jsDelivr 拉取**，不随仓库 |
+
+### 开发分支（dev/data-upgrade）数据说明
+
+> ⚠️ 本开发分支为**精简开发分支**，为减小仓库体积（约 26MB），**不包含** `public/data/cshapes-2.1.geojson` 历史疆域数据文件。
+> 世界地图模式（1886–2023）依赖该文件；如需在本地运行世界模式，请先手动补回：
+> 1. 从 `main` 分支或 `v1.0.0` 发布标签中复制 `cshapes-2.1.geojson` 到 `public/data/`；**或**
+> 2. 从 CShapes 官方项目（<https://cshapes.org>，数据集 Weidmann et al. 2010，CC BY-NC-SA 4.0）获取 CShapes 2.1，放置为 `public/data/cshapes-2.1.geojson`。
+>
+> 中国历代疆域模式与河流 / 山脉 / 湖泊等自然地理图层**不受影响**，无需该文件。`main` 分支与发布版本均已内置 CShapes 数据，可直接克隆运行与部署。
 | 国旗 SVG（271 个） | flag-icons | MIT | 随仓库 `public/flags/` |
 | 地形晕渲瓦片 | Amazon Terrain Tiles（Terrarium 编码） | 见 [AWS 条款](https://registry.opendata.aws/terrain-tiles/) | **运行时在线请求**，无需 Key |
 
