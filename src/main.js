@@ -5,6 +5,7 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { loadCShapes } from './data/loaders.js';
 import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.js';
+import { polityDesc, fallbackDesc, regionOf } from './data/polity-desc.js';
 import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
@@ -287,6 +288,9 @@ async function ensureHb(year) {
         geometry: f.geometry,
       };
       feat.meta = polygonMeta(f.geometry); // 预计算质心，供标签层使用
+      if (feat.meta && feat.meta.c) {
+        feat.properties.region = regionOf(feat.meta.c[0], feat.meta.c[1]); // 供信息卡兜底简介
+      }
       return feat;
     });
     hbCache.set(year, feats);
@@ -346,10 +350,13 @@ function buildWorldHistLabelLayer() {
   }
   const data = [...byName.values()].map((f) => ({
     coordinates: f.meta.c,
-    text: labelChinese ? (zhCountry(f.properties.cntry_name) || f.properties.cntry_name) : f.properties.cntry_name,
+    // 传年份："Jin" 在晋朝快照要译"西晋/东晋"（不是女真金）、"Song Empire" 分北宋/南宋
+    text: labelChinese
+      ? (zhCountry(f.properties.cntry_name, f.properties.snapYear) || f.properties.cntry_name)
+      : f.properties.cntry_name,
   }));
   return new TextLayer({
-    id: 'territory-label',
+    id: 'hb-territory-label',
     data,
     getPosition: (d) => d.coordinates,
     getText: (d) => d.text,
@@ -622,7 +629,7 @@ let labelChars = 'auto';
 function computeLabelChars() {
   const s = new Set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .-()\'/');
   const add = (txt) => { if (txt) for (const ch of txt) s.add(ch); };
-  for (const t of territories) add(zhCountry(t.feature.properties.cntry_name) || t.feature.properties.cntry_name);
+  for (const t of territories) add(zhCountry(t.feature.properties.cntry_name, t.startYear) || t.feature.properties.cntry_name);
   if (rivers) for (const f of rivers.features) add(zh(RIVER_ZH, f.properties?.name || ''));
   if (mountains) for (const f of mountains.features) add(zh(MOUNTAIN_ZH, f.properties?.name || ''));
   for (const d of DYNASTIES) {
@@ -646,7 +653,7 @@ function buildTerritoryLabelLayer() {
   const byName = new Map();
   for (const t of territoriesAtYear(currentYear)) {
     if (!t.meta || !t.meta.c || t.meta.d < minDiag) continue;
-    const name = zhCountry(t.feature.properties.cntry_name) || t.feature.properties.cntry_name;
+    const name = zhCountry(t.feature.properties.cntry_name, currentYear) || t.feature.properties.cntry_name;
     const prev = byName.get(name);
     if (!prev || t.meta.d > prev.meta.d) byName.set(name, t);
   }
@@ -654,7 +661,7 @@ function buildTerritoryLabelLayer() {
     const name = t.feature.properties.cntry_name;
     return {
       coordinates: t.meta.c,
-      text: labelChinese ? (zhCountry(name) || name) : name,
+      text: labelChinese ? (zhCountry(name, currentYear) || name) : name,
     };
   });
   return new TextLayer({

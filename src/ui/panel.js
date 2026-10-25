@@ -1,6 +1,7 @@
 // 右侧面板：图层开关 + 复位 + 信息卡展示
 // CShapes 真实字段：cntry_name / capname / area / gwcode / gwsyear / gweyear / status
 import { zhCountry, zh, bilingual, RIVER_ZH, MOUNTAIN_ZH } from '../data/i18n.js';
+import { polityDesc, fallbackDesc } from '../data/polity-desc.js';
 import { getEvents } from '../data/events.js';
 import { statesAtYear, isInterregnum } from '../data/china.js';
 
@@ -122,7 +123,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   function renderEvents(props) {
     if (!infoEvents) return;
     const enName = props.cntry_name || '';
-    const cnName = zhCountry(enName);
+    const cnName = zhCountry(enName, props.snapYear ?? props.gwsyear ?? null);
     const zhOn = document.getElementById('toggle-zh')?.checked;
     const viewYear = parseInt(document.getElementById('year-display')?.textContent || '0', 10) || 0;
     const events = getEvents(enName)
@@ -194,7 +195,11 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
       if (onShowInfo) onShowInfo(props);
       return;
     }
-    const cnName = zhCountry(enName);
+    // 传年份才能区分同名政权："Jin" 在晋朝快照译"西晋/东晋"、Song Empire 分北宋/南宋
+    // ⚠️ 顺序重要：CShapes 的 gwsyear 是「该疆域切片的起始年」（如美国 1886 年那片），
+    // 与当前视图年份可相差百年；用它去查年代感知译名/简介会取错条目。故优先用视图年份。
+    const infoYear = props.snapYear ?? viewYear ?? props.gwsyear ?? null;
+    const cnName = zhCountry(enName, infoYear);
     const flag = flagOf(enName);
     name.textContent = bilingual(cnName, enName);
     if (flag) {
@@ -246,10 +251,10 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     if (RULE_LABEL[props.status]) {
       let rulerZh = '';
       if (props.subjecto) {
-        rulerZh = zhCountry(props.subjecto) || props.subjecto;
+        rulerZh = zhCountry(props.subjecto, infoYear) || props.subjecto;
       } else if (typeof rulerName === 'function') {
-        const rulerEn = rulerName(props.ruledby, props.gwsyear ?? props.snapYear ?? viewYear ?? 2023);
-        if (rulerEn) rulerZh = zhCountry(rulerEn) || rulerEn; // 俄罗斯（苏联）/ 德国（普鲁士）等历史别名均可译出
+        const rulerEn = rulerName(props.ruledby, viewYear ?? props.snapYear ?? props.gwsyear ?? 2023);
+        if (rulerEn) rulerZh = zhCountry(rulerEn, infoYear) || rulerEn; // 俄罗斯（苏联）/ 德国（普鲁士）等历史别名均可译出
       }
       if (rulerZh) {
         rows.push(`<div><span class="k">${RULE_LABEL[props.status]}：</span>${rulerZh}</div>`);
@@ -259,6 +264,11 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     if (props.area != null)
       rows.push(`<div><span class="k">面积：</span>${Math.round(Number(props.area)).toLocaleString()} km²</div>`);
     if (props.gwcode != null) rows.push(`<div><span class="k">GW 编码：</span>${props.gwcode}</div>`);
+    // 简介：优先查历史政权简介表（含民族/人种与关键事件）；
+    // 未收录的政权按名称类型 + 所在地区自动生成兜底文案，保证介绍栏不空白。
+    const desc = polityDesc(enName, infoYear)
+      || fallbackDesc(enName, { year: infoYear, region: props.region, zh: cnName });
+    if (desc) rows.push(`<div><span class="k">简介：</span>${desc}</div>`);
     body.innerHTML = rows.join('');
     info.classList.remove('hidden');
     if (onShowInfo) onShowInfo(props);

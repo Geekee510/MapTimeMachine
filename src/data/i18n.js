@@ -309,8 +309,14 @@ const HB_ZH = {
   'Khiva Khanate': '希瓦汗国', 'Bukara Khanate': '布哈拉汗国', 'Quazaq Khanate': '哈萨克汗国',
   'Khanate of Kazan': '喀山汗国', 'central Asian khanates': '中亚诸汗国', 'Bokhara Khanate': '布哈拉汗国',
   'Tibet': '吐蕃 / 西藏', 'Tibetan Empire': '吐蕃', 'Tibetans': '吐蕃',
-  'Xixia': '西夏', 'Liao': '辽', 'Jin': '金', 'Jin Empire': '金',
+  // ⚠️ "Jin" 在 historical-basemaps 里只出现在公元 300/400/500 年的快照（晋朝），
+  //    不是女真金朝（HB 数据集里根本没有女真金）。此前误译为"金"，导致"隋朝之前是金"。
+  //    具体是西晋还是东晋由 YEAR_AWARE_ZH 按年份判定。
+  'Xixia': '西夏', 'Liao': '辽', 'Jin': '晋', 'Jin Empire': '晋',
   'Xia': '夏', 'Zhangzhung Kingdom': '象雄',
+  // 十六国 / 南北朝（此前走音译兜底，译成了"西蒂诸王国""纳-扎奥"等无意义音译）
+  'Sixteen Kingdoms': '十六国', 'Nan-Zhao': '南诏', 'Silia': '新罗（新罗统一期）',
+  'Cuman-Kipchak confederation': '库曼-钦察联盟', 'Kipchaks': '钦察人', 'Cumans': '库曼人',
   // 亚洲其他
   'Japan': '日本', 'Korea': '朝鲜', 'Goryeo': '高丽', 'Joseon': '朝鲜',
   'Ryukyu': '琉球', 'Dai Viet': '大越', 'Champa': '占城', 'Khmer Empire': '高棉帝国（吴哥）',
@@ -364,7 +370,7 @@ const HB_ZH = {
   'Dunhuang': '敦煌', 'Hami': '哈密', 'Turkic Khaganate': '突厥汗国',
   'Gokturks': '突厥', 'Göktürks': '突厥', 'Xiongnu': '匈奴', 'Huns': '匈奴',
   'Khazar Khaganate': '可萨汗国', 'Khazaria': '可萨', 'Uyghur Khaganate': '回鹘汗国',
-  'Rouran Khaganate': '柔然汗国', 'Xianbei': '鲜卑', 'Toba Wei': '拓跋魏',
+  'Rouran Khaganate': '柔然汗国', 'Xianbei': '鲜卑', 'Toba Wei': '北魏（拓跋魏）',
 
   // ---- 南亚 / 东南亚 ----
   'Kashmir': '克什米尔', 'Kashmir and Ladakh': '克什米尔与拉达克', 'Ladakh': '拉达克',
@@ -2290,7 +2296,39 @@ const SUFFIX_ORDER = Object.keys(POLITY_SUFFIX_ZH).sort((a, b) => b.length - a.l
 
 // 供 deck.gl TextLayer 的 characterSet 使用：历史政权译名里的汉字也要包含，
 // 否则 1886 年前的世界标签会出现缺字形（空白方块）。
-export const HB_ZH_VALUES = [...Object.values(HB_ZH), ...Object.values(POLITY_SUFFIX_ZH)];
+// ---- 同名不同朝：英文名相同、但不同年代指不同政权 ----
+// 典型：historical-basemaps 的 "Jin" 只出现在公元 300/400/500 年快照里，是【晋朝】
+// （此前被译作女真"金"，于是出现"隋朝之前是金"的笑话）；
+// "Song Empire" 1127 年前是北宋、之后是南宋；"Uyghurs" 唐代是回鹘，近现代才是维吾尔族。
+// 格式：名称 -> [[起始年, 结束年, 译名], …]（按年份取第一条命中的）
+// ⚠️ 必须声明在 HB_ZH_VALUES 之前，否则字符集收集时触发 TDZ ReferenceError。
+const YEAR_AWARE_ZH = {
+  Jin: [[-9999, 316, '西晋'], [317, 420, '东晋'], [421, 9999, '晋']],
+  'Jin Empire': [[-9999, 316, '西晋'], [317, 420, '东晋'], [421, 9999, '晋（东晋）']],
+  'Song Empire': [[-9999, 1126, '北宋'], [1127, 9999, '南宋']],
+  Song: [[-9999, 1126, '北宋'], [1127, 9999, '南宋']],
+  Uyghurs: [[-9999, 840, '回鹘（回纥）'], [841, 9999, '维吾尔人']],
+  Uyghur: [[-9999, 840, '回鹘（回纥）'], [841, 9999, '维吾尔人']],
+  Wei: [[-9999, -387, '魏（战国）'], [-386, 265, '曹魏（三国）'], [266, 534, '北魏'], [535, 9999, '西魏']],
+  Wu: [[-9999, -221, '吴（春秋战国）'], [-220, 279, '吴（三国）'], [280, 9999, '吴']],
+  Han: [[-9999, -207, '汉（战国·刘邦封地）'], [-206, 220, '汉（汉朝）'], [221, 9999, '汉']],
+  Qin: [[-9999, -222, '秦（战国）'], [-221, -207, '秦（秦朝）'], [-206, 9999, '秦']],
+  Zhou: [[-9999, -770, '西周'], [-769, -256, '东周（春秋战国）'], [-255, 9999, '周']],
+  Tang: [[-9999, 617, '唐（李渊封地）'], [618, 907, '唐（唐朝）'], [908, 9999, '后唐']],
+  Xia: [[-9999, -1601, '夏（夏朝）'], [-1600, 1037, '夏'], [1038, 1227, '西夏'], [1228, 9999, '夏']],
+};
+function yearAwareZh(en, year) {
+  const tbl = YEAR_AWARE_ZH[en];
+  if (!tbl || year == null || !Number.isFinite(year)) return null;
+  for (const [a, b, v] of tbl) if (year >= a && year <= b) return v;
+  return null;
+}
+
+// 年代感知译名（西晋/东晋/北宋/南宋/回鹘…）也要进字符集，否则标签缺字形变豆腐块
+const YEAR_AWARE_VALUES = Object.values(YEAR_AWARE_ZH).flatMap((t) => t.map((r) => r[2]));
+export const HB_ZH_VALUES = [
+  ...Object.values(HB_ZH), ...Object.values(POLITY_SUFFIX_ZH), ...YEAR_AWARE_VALUES,
+];
 
 // 宗主国括号："Algeria (France)" → "法属阿尔及利亚"
 const COLONIAL_PREFIX = {
@@ -2431,9 +2469,12 @@ function translatePolity(en) {
 }
 
 // 取中文译名，未收录则回退原名。
-// 依次：历史政权表 → 现代国名表 → 规则化组合 → 去括号 → 括号前主名
-export function zhCountry(en) {
+// 依次：年代感知表（同名不同朝）→ 历史政权表 → 现代国名表 → 规则化组合 → 去括号 → 括号前主名
+// year 可选：传入年份才能区分"晋/金""北宋/南宋""回鹘/维吾尔"等同名政权。
+export function zhCountry(en, year) {
   if (!en) return en;
+  const yz = yearAwareZh(en, year);
+  if (yz) return yz;
   const hb = HB_ZH[en];
   if (hb) return hb;
   // 宗主国括号优先于"去括号回退"，否则 "Algeria (France)" 会丢掉"法属"
@@ -2449,7 +2490,7 @@ export function zhCountry(en) {
   // 最后兜底：原名是"非拉丁文字（民族自称）"但带英文括注，如 "𐓏𐒰…(Osage)"，取括注里的名字
   const br = en.trim().match(/\(([^)]+)\)\s*$/);
   if (br) {
-    const inner = zhCountry(br[1]);
+    const inner = zhCountry(br[1], year);
     if (inner && inner !== br[1]) return inner;
   }
   return en;

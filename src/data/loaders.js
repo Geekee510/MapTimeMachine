@@ -1,3 +1,5 @@
+import { regionOf } from './polity-desc.js';
+
 // 数据加载器：CShapes 历史疆域 GeoJSON（1886–2023）
 // 公共目录 public/data 下，前端直接 fetch 静态文件。
 // 当前使用全精度原文件（约 26MB，边界最准，适合本机/MVP 开发）。
@@ -53,6 +55,21 @@ const CHINA_PART = {
   Taiwan: { from: 1946, zh: '中国台湾' }, // 1946 起（补上 CShapes 缺失的 1946–1948）
   Tibet: { from: 1913, zh: '中国西藏' },
 };
+
+// 粗算要素的中心经纬度（只扫每个 Polygon 的首个外环，够用于判断所属大区，避免全量扫描拖慢启动）
+function roughCenter(geometry) {
+  if (!geometry) return null;
+  const polys = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+  let sx = 0; let sy = 0; let n = 0;
+  for (const poly of polys) {
+    const ring = poly && poly[0];
+    if (!Array.isArray(ring)) continue;
+    for (const c of ring) {
+      if (Array.isArray(c) && typeof c[0] === 'number') { sx += c[0]; sy += c[1]; n++; }
+    }
+  }
+  return n ? [sx / n, sy / n] : null;
+}
 
 async function fetchCShapesOnce() {
   const controller = new AbortController();
@@ -112,6 +129,10 @@ export async function loadCShapes() {
       sy = Math.min(sy, fix.from);
       fixed++;
     }
+
+    // 所属大区（供信息卡生成兜底简介，如"位于东亚的独立国家"）
+    const c = roughCenter(f.geometry);
+    p.region = c ? regionOf(c[0], c[1]) : '';
 
     return {
       feature: f,
