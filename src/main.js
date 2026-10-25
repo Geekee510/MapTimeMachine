@@ -1005,7 +1005,7 @@ function getYearEvents(y) {
     const d = getDynastyAtYear(y);
     if (!d) return { title: `📜 ${fmtYear(y)} · 暂无对应朝代`, items: [] };
     const items = [{ t: `都城：${d.capital}`, d: d.desc }];
-    for (const e of d.events || []) items.push({ t: `${fmtYear(e.year)} ${e.title}`, d: e.desc });
+    for (const e of d.events || []) items.push({ t: `${fmtYear(e.year)} ${e.title}`, d: e.desc, cat: e.cat });
     return { title: `📜 ${fmtYear(y)} · ${d.name}朝（${fmtYear(d.start)} – ${fmtYear(d.end)}）`, items };
   }
   return { title: `🌍 ${fmtYear(y)} 年 · 世界大事`, items: getWorldEvents(y) };

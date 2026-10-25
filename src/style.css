@@ -107,6 +107,17 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
 #world-events .we-list li { margin: 9px 0; padding-left: 12px; border-left: 3px solid #b3541e; }
 #world-events .we-title { font-weight: 700; color: #1a1a1a; }
 #world-events .we-desc { color: #555; font-size: 12px; margin-top: 2px; }
+/* 事件分类标签：政(蓝)/战(红)/经(绿)/文(橙)/科(紫) */
+#world-events .we-cat {
+  display: inline-block; font-size: 11px; font-weight: 700; color: #fff;
+  padding: 0 6px; border-radius: 4px; margin-right: 6px; line-height: 17px;
+  vertical-align: middle;
+}
+#world-events .cat-政 { background: #2c6fbb; }
+#world-events .cat-战 { background: #c84646; }
+#world-events .cat-经 { background: #2f8f5b; }
+#world-events .cat-文 { background: #9a6c1f; }
+#world-events .cat-科 { background: #6a4fa0; }
 #world-events .we-empty { color: #888; font-style: italic; }
 #world-events .we-foot { margin-top: 10px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 6px; }
 #timeline #step-back, #timeline #step-fwd { min-width: 34px; padding: 6px 8px; border: none; border-radius: 8px; background: #6c8ebf; color: #fff; cursor: pointer; font-size: 12px; }

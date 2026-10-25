@@ -48,7 +48,8 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle, getYearE
     if (items.length) {
       html += '<ul class="we-list">';
       for (const e of items) {
-        html += `<li><div class="we-title">${e.t}</div>${e.d ? `<div class="we-desc">${e.d}</div>` : ''}</li>`;
+        const catBadge = e.cat ? `<span class="we-cat cat-${e.cat}">${e.cat}</span> ` : '';
+        html += `<li><div class="we-title">${catBadge}${e.t}</div>${e.d ? `<div class="we-desc">${e.d}</div>` : ''}</li>`;
       }
       html += '</ul>';
     } else {
