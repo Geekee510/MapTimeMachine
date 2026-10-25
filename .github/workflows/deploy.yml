@@ -32,6 +32,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 中国历代疆域/政区数据已移出版本库，构建时由脚本生成（仅依赖本地 china_provinces / china_hist，无需联网）
+      - name: 生成中国历代疆域 (china_dynasties)
+        run: npm run gen-china
+
+      - name: 生成中国历代政区界 (china_regions)
+        run: npm run gen-china-regions
+
       # 数据（含 CShapes 26MB）已随仓库提交，build 时 Vite 直接复制 public/ 到 dist/
       - name: Build
         run: npm run build
