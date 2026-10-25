@@ -13,7 +13,13 @@ flag-icons-main/
 # 生成脚本的下载缓存（原始数据已抽取进 public/data/，脚本会自动重新下载）
 .tmp-*/
 
-# 数据文件（public/data/*.geojson）现已随仓库提交，便于一键部署与克隆即运行。
+# 数据文件：CShapes 2.1 / Natural Earth 等仍随仓库提交，便于一键部署与克隆即运行。
+# 但以下两个“生成脚本产物”不再进版本库——改由 CI 构建时（及本地 npm run gen-*）生成，
+# 避免 7MB 级文件被反复提交、在历史中堆积导致仓库虚胖：
+#   public/data/china_dynasties.geojson  ← npm run gen-china（依据 DataV 省界拼接）
+#   public/data/china_regions.geojson    ← npm run gen-china-regions（CHGIS 政区界）
+public/data/china_dynasties.geojson
+public/data/china_regions.geojson
 # 如需重新生成 Natural Earth 数据，可运行 npm run fetch-data（CShapes 2.1 已随仓库提供）。
 
 # 编辑器 / 系统
