@@ -237,14 +237,12 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
 /* ── 地图图钉（关隘城楼 / 骑马小人 / 交战）：MapLibre DOM Marker ──────────
    0×0 的锚点盒，子元素全部绝对定位到锚点中心；只有图标本身接收鼠标事件，
    否则会挡住地图拖动。白晕用多层 drop-shadow 叠出来，压在深色疆域上也清楚。
-   缩放用 CSS 变量 --s、朝向用 --rot，这样旋转与 hover 放大不会互相覆盖
+   缩放/镜像走 CSS 变量 --s / --flip，这样 hover 放大与"马朝左"不会互相覆盖
    （两处都写 transform 的话，后写的会把先写的整条替换掉）。 */
 .pin { width: 0; height: 0; overflow: visible; }
 .pin .pin-icon {
   position: absolute; left: 0; top: 0;
-  /* --rot 存的是**方位角**（正北 0°、顺时针）；图标本体朝右（+x），
-     所以实际旋转要减 90°，否则北行会画成"朝东走"。 */
-  transform: translate(-50%, -50%) rotate(calc(var(--rot, 0deg) - 90deg)) scale(var(--s, 1));
+  transform: translate(-50%, -50%) scale(var(--s, 1));
   display: block; line-height: 0; pointer-events: auto; cursor: pointer;
   filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 2.5px #fff) drop-shadow(0 1px 2px rgba(0,0,0,.55));
   transition: transform .12s ease;
@@ -264,14 +262,44 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
   filter: drop-shadow(0 0 3px #ffb030) drop-shadow(0 0 6px #ffcf6a) drop-shadow(0 1px 2px rgba(0,0,0,.5));
 }
 
-/* 骑马小人：图标本身朝右画，容器已按 --rot 转过，所以这里只做上下起伏
-   （跑动感），不再动 transform（会顶掉旋转）。 */
+/* 骑马的图标：**侧视图不能跟着方位角转圈**。
+   第一版把 --rot（方位角）直接用在 transform 上，结果是"向南走"就把整匹马
+   转 180°——马腿朝天、骑手头朝下；城楼没有 --rot，被默认值 -90° 转成横躺，
+   看起来像"头朝左"。侧视剪影在俯视地图上只该**左右翻转**（--flip=±1），
+   永不上仰或倒立。 */
+.pin-rider .pin-icon {
+  /* 纵向只上移 86%（= 蹄子在 40 高画布里的位置），让马蹄正好踩在路线终点上，
+     而不是图标中心压在坐标上、整个人悬在路线外侧。 */
+  transform: translate(-50%, -86%) scaleX(var(--flip, 1)) scale(var(--s, 1));
+  transform-origin: 50% 50%;
+}
+
+/* 跑动：整体轻微起伏 + 四条腿分两组交替摆动（对角腿同相） */
 @keyframes pin-gallop {
   0%, 100% { transform: translateY(0) }
-  50% { transform: translateY(-1.6px) }
+  50% { transform: translateY(-1.2px) }
 }
-.pin-rider .pin-icon > svg { animation: pin-gallop .34s ease-in-out infinite; }
-.pin-rider.is-idle .pin-icon > svg { animation: none; } /* 守军原地驻守，不跑动 */
+@keyframes leg-a {
+  0%, 100% { transform: rotate(-9deg) }
+  50% { transform: rotate(11deg) }
+}
+@keyframes leg-b {
+  0%, 100% { transform: rotate(11deg) }
+  50% { transform: rotate(-9deg) }
+}
+.pin-rider .pin-icon > svg { animation: pin-gallop .52s ease-in-out infinite; }
+/* transform-box: view-box 让 transform-origin 可以用 SVG 用户坐标（= 关节位置），
+   否则默认按 bbox 百分比算，四条腿的支点会跑到一起。 */
+.pin-rider .h-leg { transform-box: view-box; }
+.pin-rider .h-front-near { transform-origin: 37.6px 24.4px; animation: leg-a .52s linear infinite; }
+.pin-rider .h-front-far { transform-origin: 35.2px 24.2px; animation: leg-b .52s linear infinite; }
+.pin-rider .h-rear-near { transform-origin: 16.8px 24.2px; animation: leg-b .52s linear infinite; }
+.pin-rider .h-rear-far { transform-origin: 19.4px 24.2px; animation: leg-a .52s linear infinite; }
+.pin-rider .h-tail { transform-box: view-box; transform-origin: 13.6px 18.4px; animation: leg-a .52s linear infinite; }
+/* 守军原地驻守 → 全部静止 */
+.pin-rider.is-idle .pin-icon > svg,
+.pin-rider.is-idle .h-leg,
+.pin-rider.is-idle .h-tail { animation: none; }
 
 /* 交战：图标弹出 + 红环外扩（两军相撞的冲击感）。
    红环要钉在图标中心：.pin-icon 的左上角就是锚点，所以必须 left/top 用 50%。

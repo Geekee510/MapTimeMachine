@@ -2,13 +2,13 @@
 // ---------------------------------------------------------------------------
 // 关隘 / 交战点 / 行军中的人马这类"固定像素大小 + 可点击 + 带文字"的标记，用
 // MapLibre Marker 比 deck.gl IconLayer 更稳（见 lib/icons.js 的说明）。
-// 本模块只做一件事：把 [{id, kind, coord, label, selected, rot, color, idle}]
+// 本模块只做一件事：把 [{id, kind, coord, label, selected, flip, color, idle}]
 // 同步到地图上的 DOM 标记，复用已存在的标记（只改位置/类名/文案），多余的下线。
 //
 // 支持逐帧更新（战争动画里骑马的图钉每帧都在动）：
 //   coord  经纬度      → marker.setLngLat（MapLibre 内部走 transform，很轻）
-//   rot    朝向角度     → CSS 变量 --rot（正北 0°、顺时针）
-//   color  阵营色       → CSS 变量 --pin-color（骑手斗篷用）
+//   flip   ±1 左右镜像  → CSS 变量 --flip（侧视图只翻转，不转圈）
+//   color  阵营色       → CSS 变量 --pin-color（骑手甲胄用）
 //   idle   原地驻守     → 加 is-idle 类，关掉跑动动画
 // 为避免每帧重建 DOM，先算一个"签名"，内容没变就整体返回。
 
@@ -27,7 +27,7 @@ export function createPinLayer(map) {
         (d) =>
           `${d.id}:${d.kind}:${d.selected ? 1 : 0}:${d.label || ''}:` +
           `${d.coord[0].toFixed(4)},${d.coord[1].toFixed(4)}:` +
-          `${d.rot == null ? '' : Math.round(d.rot)}:${d.color || ''}:${d.idle ? 1 : 0}`
+          `${d.flip || 1}:${d.color || ''}:${d.idle ? 1 : 0}`
       )
       .join('|');
     if (global === lastGlobal) return;
@@ -55,8 +55,8 @@ export function createPinLayer(map) {
         rec.el.innerHTML = pinHtml(d.kind, d.label);
         rec.sig = sig;
       }
-      // 朝向 / 阵营色每帧都可能变，走 CSS 变量（不触碰 DOM 结构）
-      if (d.rot != null) rec.el.style.setProperty('--rot', `${d.rot.toFixed(1)}deg`);
+      // 镜像 / 阵营色每帧都可能变，走 CSS 变量（不触碰 DOM 结构）
+      if (d.flip) rec.el.style.setProperty('--flip', String(d.flip));
       if (d.color) rec.el.style.setProperty('--pin-color', d.color);
       rec.el.onclick = (e) => {
         e.stopPropagation();

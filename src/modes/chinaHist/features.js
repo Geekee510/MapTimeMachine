@@ -146,11 +146,13 @@ export function buildCityLayers(o = {}) {
       data,
       getPosition: (d) => d.coord,
       getText: (d) => d.label,
-      getSize: (d) => (d.rank === 1 ? 17 : d.rank === 2 ? 14.5 : 12.5),
-      getColor: (d) => (d.rank === 1 ? [126, 66, 12, 255] : [138, 96, 48, 245]),
+      // 字号整体上调：12.5px 的三级城名（夷陵、硖州这类）在 1x 屏上已经接近
+      // 不可读，尤其是压在描边/疆域填充上时。现在 18 / 16 / 14.5，三级也够看。
+      getSize: (d) => (d.rank === 1 ? 18 : d.rank === 2 ? 16.5 : 15.5),
+      getColor: (d) => (d.rank === 1 ? [118, 58, 8, 255] : [126, 84, 34, 250]),
       // 标签错行：一级城名放点的下方，二/三级放上方并缩小。江南、中原一带城市密集
       // （杭州与绍兴只差 0.4°），全部压在点下方会叠成一坨；上下错开能救回来不少。
-      getPixelOffset: (d) => (d.rank === 1 ? [0, 15] : d.rank === 2 ? [0, -13] : [0, -11]),
+      getPixelOffset: (d) => (d.rank === 1 ? [0, 16] : d.rank === 2 ? [0, -15] : [0, -13]),
       stroke: true,
       getStrokeColor: [255, 250, 240, 225],
       strokeWidth: 3,
@@ -198,11 +200,14 @@ export function warPins(year, progress, o = {}) {
       const frac = p1 > p0 ? clamp01((p - p0) / (p1 - p0)) : 1;
       const { head, headAngle } = traveledPath(f.route, frac);
       if (!head) continue;
+      // 朝向：侧视图只做左右翻转。headAngle 是方位角（正北 0°、顺时针），
+      // 正弦分量的符号即"向东 / 向西"：往西走就镜像成面朝左，人马始终正立。
+      const flip = Math.sin((headAngle * Math.PI) / 180) < -0.06 ? -1 : 1;
       out.push({
         id: `rider-${w.id}-${f.party}`,
         kind: 'rider',
         coord: head,
-        rot: headAngle,
+        flip,
         color: party.color,
         idle: routeLength(f.route) < 1e-6, // 守军原地不动 → 关掉跑动动画
         label: '',
