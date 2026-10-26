@@ -25,3 +25,6 @@ public/data/china_regions.geojson
 # 编辑器 / 系统
 .DS_Store
 *.local
+
+# Vite 加载配置时偶发产生的临时文件
+vite.config.js.timestamp-*

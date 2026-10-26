@@ -7,6 +7,7 @@ import { loadCShapes } from './data/loaders.js';
 import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.js';
 import { polityDesc, fallbackDesc, regionOf } from './data/polity-desc.js';
 import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
+import { dissolveFeatures } from './lib/geo.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
 import { createPanel } from './ui/panel.js';
@@ -87,6 +88,8 @@ let chinaOutlines = null; // china_outline.geojson：historical-basemaps 提取�
 let chinaRegions = null; // china_regions.geojson：CHGIS 历代政区界（州/郡/府/路），叠在疆域之上
 let chinaProvinces = null; // 当代省级地图底板（DataV GeoJSON，运行时拉取，仅作浅色参考线，无交互）
 let chinaProvincesLoaded = false; // 是否已触发过省界加载（懒加载，仅一次）
+let chinaPreqin = null; // china_preqin.geojson：夏/西周的真实几何（historical-basemaps，CC BY-SA）
+let chinaPreqinLoaded = false; // 是否已触发过先秦几何加载（懒加载，仅一次）
 let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
 let histInfoOpen = false; // 第三模式（中国历史地图）信息卡是否打开
 let histLastPolityId = null; // 当前展示的政权 id（年份拖动时刷新该卡）
@@ -776,20 +779,60 @@ function buildChinaTerritoryLayer() {
 //   · 中华人民共和国：该轮廓缺台湾、西藏等，实心覆盖反而掩盖了我们省界清单里的完整版图。
 // 现在只作为"史实边界参考线"（红色细线）叠在疆域之上，既不遮挡分色也不缺块。
 // 每个朝代可能有多个年代的轮廓（如清有 1700/1783/1800），取年份最接近当前年份的那个。
-// 注意：**中华人民共和国没有轮廓数据**——HB 的 1960 China 多边形缺西藏/台湾/海南
-// （已在 gen-china-outline.mjs 中剔除），此函数对该朝代返回 null，不画参考线；
-// 现代中国疆域一律以省界拼接层为准（该层含台湾、西藏、海南及南海诸岛）。
+// 注意：**中华人民共和国没有 HB 轮廓数据**——HB 的 1960 China 多边形缺西藏/台湾/海南
+// （已在 gen-china-outline.mjs 中剔除），这类朝代改由下面的 dissolve 外轮廓兜底，
+// 现代中国疆域仍以省界拼接层为准（该层含台湾、西藏、海南及南海诸岛）。
+//
+// dissolve 解出的外轮廓缓存：key = 朝代id + 当年生效的政权切片签名。
+// dissolve 一次约 30~60ms，拖动年份时不能每帧重算；只在切换政权切片时变。
+const _outlineDissolveCache = new Map();
+
+// 从省界拼接层 dissolve 出「外轮廓」——用于**没有 HB 史实轮廓**的朝代。
+// 原理：同一朝代各要素里，两省共享的边出现 2 次（内部边，丢弃），
+// 只属于一省的边出现 1 次（海岸线/国界/朝代边缘，保留）→ 首尾相连即外轮廓。
+// 这样 22 个朝代的「史实边界参考线」开关都能出线，不再有 15 个朝代是空白。
+function buildDissolveOutline(d) {
+  if (!chinaDynasties) return null;
+  const feats = chinaDynasties.filter(
+    (f) => f.properties.id === d.id
+      && (f.properties.sStart == null
+        || (currentYear >= f.properties.sStart && currentYear <= f.properties.sEnd))
+  );
+  if (!feats.length) return null;
+  const sig = d.id + '|' + feats.map((f) => `${f.properties.state || ''}@${f.properties.sStart ?? ''}`).join(',');
+  let cached = _outlineDissolveCache.get(sig);
+  if (!cached) {
+    const rings = dissolveFeatures(feats, 5);
+    cached = rings.map((r) => ({
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Polygon', coordinates: [r] },
+    }));
+    _outlineDissolveCache.set(sig, cached);
+  }
+  if (!cached.length) return null;
+  return { type: 'FeatureCollection', features: cached };
+}
+
 function buildChinaOutlineLayer() {
   const d = getDynastyAtYear(currentYear);
-  if (!d || !chinaOutlines || !chinaOutlines.length) return null;
-  const cands = chinaOutlines.filter((f) => f.properties.dynasty === d.id);
-  if (!cands.length) return null;
-  const best = cands.reduce((a, b) =>
-    Math.abs(b.properties.year - currentYear) < Math.abs(a.properties.year - currentYear) ? b : a
-  );
+  if (!d) return null;
+  // 优先用 historical-basemaps 的史实王朝轮廓（按历史疆域绘制，形状更接近史实）；
+  // 该朝代没有 HB 轮廓时，退回用省界拼接层 dissolve 出的外轮廓。
+  const cands = (chinaOutlines || []).filter((f) => f.properties.dynasty === d.id);
+  let data = null;
+  if (cands.length) {
+    const best = cands.reduce((a, b) =>
+      Math.abs(b.properties.year - currentYear) < Math.abs(a.properties.year - currentYear) ? b : a
+    );
+    data = { type: 'FeatureCollection', features: [best] };
+  } else {
+    data = buildDissolveOutline(d);
+  }
+  if (!data) return null;
   return new GeoJsonLayer({
     id: 'china-outline',
-    data: { type: 'FeatureCollection', features: [best] },
+    data,
     stroked: true,
     filled: false, // 关键：不再用第二个实心多边形覆盖疆域层
     // 配色：先试过深褐 [90,30,18]、深靛紫 [96,58,142]，与砖红填充相比
@@ -1069,20 +1112,21 @@ function updateLayers() {
     }
     // 历史疆域（中央王朝底图，轻量无交互）
     if (layersState.territory) {
-      const base = buildChinaHistBaseLayers({ year: currentYear, chinaProvinces });
+      const base = buildChinaHistBaseLayers({ year: currentYear, chinaProvinces, chinaPreqin });
       if (base && base.length) layers.push(...base);
     }
     if (layersState.polity) {
       const hist = buildChinaHistLayers({
         year: currentYear,
         chinaProvinces,
+        chinaPreqin,
         labelChars,
         labelFontSettings,
         labelFontFamily: LABEL_FONT_FAMILY,
         onPolityPick: (id) => {
           histLastPolityId = id;
           histInfoOpen = true;
-          if (panel) panel.showPolity(getPolityInfo(id, currentYear, chinaProvinces));
+          if (panel) panel.showPolity(getPolityInfo(id, currentYear, { chinaProvinces, chinaPreqin }));
         },
       });
       layers.push(...hist);
@@ -1324,6 +1368,24 @@ async function loadChinaProvinces() {
   }
 }
 
+// 先秦真实几何：夏（Xia）/ 西周（Zhoa）取自 historical-basemaps 年代快照（CC BY-SA 4.0），
+// 由 scripts/gen-china-preqin.mjs 生成。仅 2KB，第三幅图用于表达"无省界可依"的夏/西周疆域。
+async function loadChinaPreqin() {
+  try {
+    const res = await fetch('./data/china_preqin.geojson');
+    if (res.ok) {
+      const gj = await res.json();
+      chinaPreqin = gj.features || [];
+      console.info(`[chinahist] 已加载先秦真实几何 ${chinaPreqin.length} 个要素`);
+      if (mode === 'chinaHist') updateLayers();
+    } else {
+      console.warn('[chinahist] 未找到 china_preqin.geojson（夏/西周疆域将不显示）');
+    }
+  } catch (e) {
+    console.warn('[chinahist] 先秦几何加载失败（可选）：', e.message);
+  }
+}
+
 // 当代省级地图底板图层：极浅填充 + 浅灰描边，无交互（pickable:false），作参考线。
 // 始终绘制在最底层（在 updateLayers 中先于其他图层 push）。
 function buildChinaProvinceBaseLayer() {
@@ -1392,13 +1454,20 @@ function setMode(m) {
     chinaProvincesLoaded = true;
     loadChinaProvinces();
   }
+  // 先秦真实几何（夏/西周）：同样懒加载，仅第三幅图用
+  if (m === 'chinaHist' && !chinaPreqinLoaded) {
+    chinaPreqinLoaded = true;
+    loadChinaPreqin();
+  }
   if (m === 'china') {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
     map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
     // 中国模式：不自动弹出介绍卡（信息卡已随模式切换关闭），待用户点击某个政权/朝代再打开
   } else if (m === 'chinaHist') {
-    currentYear = CHINA_HIST_MIN + 8; // 落在西汉存续内（含淡入）
+    // 默认落在西汉（统一王朝、疆域完整），而不是时间轴最左端的夏——
+    // 夏/商疆域为考古分布示意，作为首屏观感偏弱。
+    currentYear = -100;
     if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, currentYear);
     map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
   } else {

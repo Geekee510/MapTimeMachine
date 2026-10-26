@@ -1,15 +1,19 @@
-// 第三幅地图「中国历史地图」核心闭环模块（自包含，不改动 world/china 模式逻辑）
-// 职责：根据年份渲染汉/唐/明 + 三国/南北朝/五代十国 的政权疆域、都城点、政权名标签，
-//       并提供信息卡数据与年份事件。
+// 第三幅地图「中国历史地图」核心模块（自包含，不改动 world/china 模式逻辑）
+// 职责：按年份渲染各政权疆域、都城点、政权名标签，并提供信息卡数据与年份事件。
+//
+// 数据来自统一模型 src/data/polities（以 src/data/china.js 为唯一数据源，
+// 与第二幅图「中国疆域」共用同一批朝代/政权数据，不再各存一份）。
 // 疆域由 territoryGen 依据「现代省界并集 + Chaikin 补丁 + 极点内缩标签」生成。
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
-import { POLITIES, polityById } from './polities.js';
+import { politiesAtYear, polityById, eraAtYear } from '../../data/polities/index.js';
 import { buildPolityGeometries } from './territoryGen.js';
 
-export const CHINA_HIST_MIN = -210;
+// 时间轴范围：夏（约前 2070）至明末清初前夜。
+// 清代及以后的近代史由单独的地图承载，不在此模式内。
+export const CHINA_HIST_MIN = -2070;
 export const CHINA_HIST_MAX = 1644;
 
-const FADE = 4; // 政权边界处淡入/淡出年数（近似"扩张/更迭"过渡）
+const FADE = 4; // 政权存续边界处的淡入/淡出年数（近似"扩张/更迭"过渡）
 
 function fy(y) {
   return y < 0 ? `前${-y}` : `${y}`;
@@ -22,46 +26,54 @@ function alphaFor(start, end, year, base) {
   return base;
 }
 
-// 该年份生效（含淡入淡出区间）的政权
-function activePolities(year) {
-  return POLITIES.filter((p) => year >= p.start && year <= p.end);
+function geomCtx(opts) {
+  return {
+    provinceFeatures: opts.chinaProvinces,
+    preqinFeatures: opts.chinaPreqin,
+  };
 }
 
 // 供 main.js 在面板信息卡展示：把政权数据整理成卡片所需结构
-export function getPolityInfo(id, year, chinaProvinces) {
+export function getPolityInfo(id, year, opts = {}) {
   const p = polityById(id);
   if (!p) return null;
-  const geo = chinaProvinces ? buildPolityGeometries(p, chinaProvinces) : null;
+  // 该年生效的切片（信息卡需要显示"这一年"的疆域形态与都城）
+  const active = politiesAtYear(year).find((x) => x.id === id);
+  const seg = active ? active.seg : p.segs[p.segs.length - 1];
+  const geo = opts.chinaProvinces ? buildPolityGeometries(p, seg, geomCtx(opts)) : null;
   const a = alphaFor(p.start, p.end, year, 235);
   return {
     id: p.id,
     name: p.name,
     type: p.type,
     typeLabel: p.type === 'central' ? '中央王朝' : '并立政权',
+    eraName: p.eraName,
     start: p.start,
     end: p.end,
-    capital: p.capital,
-    capitalCoord: p.capitalCoord,
+    capital: seg.capital || p.capital,
+    capitalCoord: seg.capitalCoord || p.capitalCoord,
     desc: p.desc,
     events: (p.events || []).filter((e) => e.year <= year),
     alpha: a,
-    centroid: geo ? geo.labelPoint : p.capitalCoord,
+    centroid: geo ? geo.labelPoint : (seg.capitalCoord || p.capitalCoord),
   };
 }
 
 // 年份事件（时间轴年份读数点击时展示）
 export function getChinaHistYearEvents(year) {
-  const acts = activePolities(year);
+  const acts = politiesAtYear(year);
   if (!acts.length) {
     return { title: `📜 ${fy(year)} · 暂无对应政权`, items: [] };
   }
   const items = acts.map((p) => ({
     t: `${p.name}（${p.type === 'central' ? '中央' : '并立'}）`,
-    d: `都城：${p.capital}｜存续 ${fy(p.start)} – ${fy(p.end)}`,
+    d: `都城：${p.seg.capital || p.capital || '—'}｜存续 ${fy(p.start)} – ${fy(p.end)}`,
   }));
   const central = acts.find((p) => p.type === 'central');
+  const era = eraAtYear(year);
+  const head = central ? `${central.name}朝` : (era ? era.name : '分裂时期');
   return {
-    title: `📜 ${fy(year)} · ${central ? central.name + '朝' : '分裂时期'}（共 ${acts.length} 个政权）`,
+    title: `📜 ${fy(year)} · ${head}（共 ${acts.length} 个政权）`,
     items,
   };
 }
@@ -70,20 +82,20 @@ export function getChinaHistYearEvents(year) {
 export function buildChinaHistLayers(opts) {
   const {
     year,
-    chinaProvinces,
     labelChars,
     labelFontSettings,
     labelFontFamily,
     onPolityPick,
   } = opts || {};
 
-  const acts = activePolities(year);
+  const acts = politiesAtYear(year);
+  const ctx = geomCtx(opts);
   const polityFeatures = [];
   const capitals = [];
   const labels = [];
   for (const p of acts) {
-    if (!chinaProvinces) continue;
-    const geo = buildPolityGeometries(p, chinaProvinces);
+    if (!ctx.provinceFeatures && !ctx.preqinFeatures) continue;
+    const geo = buildPolityGeometries(p, p.seg, ctx);
     if (!geo || !geo.features.length) continue;
     const a = alphaFor(p.start, p.end, year, 235);
     if (a <= 0) continue;
@@ -96,7 +108,9 @@ export function buildChinaHistLayers(opts) {
         geometry: f.geometry,
       });
     }
-    if (p.capitalCoord) capitals.push({ coords: p.capitalCoord, text: p.capital, name: p.name });
+    const cap = p.seg.capitalCoord || p.capitalCoord;
+    const capName = p.seg.capital || p.capital;
+    if (cap && capName) capitals.push({ coords: cap, text: capName, name: p.name });
     if (geo.labelPoint) labels.push({ coordinates: geo.labelPoint, text: p.name, id: p.id });
   }
 
@@ -197,13 +211,13 @@ export function buildChinaHistLayers(opts) {
 // 此时由「政权疆域」层呈现各并立政权。与政权疆域层分工：底图=大一统王朝轮廓，
 // 政权层=全部政权（含并立）+ 都城 + 标签 + 点击交互。
 export function buildChinaHistBaseLayers(opts) {
-  const { year, chinaProvinces } = opts || {};
-  if (!chinaProvinces) return [];
-  const acts = activePolities(year).filter((p) => p.type === 'central');
+  const { year } = opts || {};
+  const acts = politiesAtYear(year).filter((p) => p.type === 'central');
   if (!acts.length) return [];
+  const ctx = geomCtx(opts);
   const feats = [];
   for (const p of acts) {
-    const geo = buildPolityGeometries(p, chinaProvinces);
+    const geo = buildPolityGeometries(p, p.seg, ctx);
     const a = alphaFor(p.start, p.end, year, 70);
     for (const f of geo.features) {
       feats.push({
