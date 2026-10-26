@@ -1014,20 +1014,20 @@ function updateLayers() {
     }
     // 历史疆域（中央王朝底图，轻量无交互）
     if (layersState.territory) {
-      const base = buildChinaHistBaseLayers({ year: currentYear, chinaOutlines });
+      const base = buildChinaHistBaseLayers({ year: currentYear, chinaProvinces });
       if (base && base.length) layers.push(...base);
     }
     if (layersState.polity) {
       const hist = buildChinaHistLayers({
         year: currentYear,
-        chinaOutlines,
+        chinaProvinces,
         labelChars,
         labelFontSettings,
         labelFontFamily: LABEL_FONT_FAMILY,
         onPolityPick: (id) => {
           histLastPolityId = id;
           histInfoOpen = true;
-          if (panel) panel.showPolity(getPolityInfo(id, currentYear));
+          if (panel) panel.showPolity(getPolityInfo(id, currentYear, chinaProvinces));
         },
       });
       layers.push(...hist);

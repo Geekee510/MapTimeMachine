@@ -1,16 +1,15 @@
 // 第三幅地图「中国历史地图」核心闭环模块（自包含，不改动 world/china 模式逻辑）
-// 职责：根据年份渲染汉/唐/明 + 三国/南北朝/五代十国 的政权疆域（含关键帧交叉淡入），
-//       政权都城点、政权名标签，并提供信息卡数据与年份事件。
+// 职责：根据年份渲染汉/唐/明 + 三国/南北朝/五代十国 的政权疆域、都城点、政权名标签，
+//       并提供信息卡数据与年份事件。
+// 疆域由 territoryGen 依据「现代省界并集 + Chaikin 补丁 + 极点内缩标签」生成。
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { POLITIES, polityById } from './polities.js';
+import { buildPolityGeometries } from './territoryGen.js';
 
 export const CHINA_HIST_MIN = -210;
 export const CHINA_HIST_MAX = 1644;
 
 const FADE = 4; // 政权边界处淡入/淡出年数（近似"扩张/更迭"过渡）
-
-// 由 buildChinaHistLayers 注入，供 getPolityInfo 解析中央王朝轮廓几何
-let _chinaOutlines = null;
 
 function fy(y) {
   return y < 0 ? `前${-y}` : `${y}`;
@@ -23,45 +22,16 @@ function alphaFor(start, end, year, base) {
   return base;
 }
 
-// 把并立政权的手绘 ring 或中央王朝复用的 outline 轮廓解析成 GeoJSON geometry
-function resolveGeometry(p, chinaOutlines) {
-  if (p.geom.outline) {
-    if (!chinaOutlines || !chinaOutlines.length) return null;
-    const cands = chinaOutlines.filter((f) => f.properties?.dynasty === p.geom.outline);
-    if (!cands.length) return null;
-    // 取年份最接近该政权中点的那一片轮廓
-    const mid = (p.start + p.end) / 2;
-    const best = cands.reduce((a, b) =>
-      Math.abs((b.properties?.year ?? 0) - mid) < Math.abs((a.properties?.year ?? 0) - mid) ? b : a
-    );
-    return best.geometry;
-  }
-  if (p.geom.ring) {
-    return { type: 'Polygon', coordinates: [p.geom.ring] };
-  }
-  return null;
-}
-
-function centroidOf(geometry) {
-  let pts = [];
-  if (geometry.type === 'Polygon') pts = geometry.coordinates[0];
-  else if (geometry.type === 'MultiPolygon') pts = geometry.coordinates[0][0];
-  if (!pts.length) return null;
-  let x = 0, y = 0;
-  for (const p of pts) { x += p[0]; y += p[1]; }
-  return [x / pts.length, y / pts.length];
-}
-
 // 该年份生效（含淡入淡出区间）的政权
 function activePolities(year) {
   return POLITIES.filter((p) => year >= p.start && year <= p.end);
 }
 
 // 供 main.js 在面板信息卡展示：把政权数据整理成卡片所需结构
-export function getPolityInfo(id, year) {
+export function getPolityInfo(id, year, chinaProvinces) {
   const p = polityById(id);
   if (!p) return null;
-  const geometry = resolveGeometry(p, _chinaOutlines);
+  const geo = chinaProvinces ? buildPolityGeometries(p, chinaProvinces) : null;
   const a = alphaFor(p.start, p.end, year, 235);
   return {
     id: p.id,
@@ -75,7 +45,7 @@ export function getPolityInfo(id, year) {
     desc: p.desc,
     events: (p.events || []).filter((e) => e.year <= year),
     alpha: a,
-    centroid: geometry ? (p.labelCoord || centroidOf(geometry)) : p.capitalCoord,
+    centroid: geo ? geo.labelPoint : p.capitalCoord,
   };
 }
 
@@ -100,37 +70,39 @@ export function getChinaHistYearEvents(year) {
 export function buildChinaHistLayers(opts) {
   const {
     year,
-    chinaOutlines,
+    chinaProvinces,
     labelChars,
     labelFontSettings,
     labelFontFamily,
     onPolityPick,
   } = opts || {};
 
-  _chinaOutlines = chinaOutlines || null; // 缓存供 getPolityInfo 使用
-
   const acts = activePolities(year);
   const polityFeatures = [];
   const capitals = [];
   const labels = [];
   for (const p of acts) {
-    const geometry = resolveGeometry(p, chinaOutlines);
-    if (!geometry) continue;
+    if (!chinaProvinces) continue;
+    const geo = buildPolityGeometries(p, chinaProvinces);
+    if (!geo || !geo.features.length) continue;
     const a = alphaFor(p.start, p.end, year, 235);
     if (a <= 0) continue;
-    polityFeatures.push({
-      type: 'Feature',
-      properties: { id: p.id, name: p.name, type: p.type, color: p.color },
-      geometry,
-    });
+    // 每个省界/补丁多边形作为独立要素，但同色渲染（描边=填充）即视觉合并为一片疆域，
+    // 内部省界因同色而隐形，只留外轮廓 —— 无需昂贵的几何并集运算。
+    for (const f of geo.features) {
+      polityFeatures.push({
+        type: 'Feature',
+        properties: { polityId: p.id, color: p.color, alpha: a },
+        geometry: f.geometry,
+      });
+    }
     if (p.capitalCoord) capitals.push({ coords: p.capitalCoord, text: p.capital, name: p.name });
-    const c = p.labelCoord || centroidOf(geometry);
-    if (c) labels.push({ coordinates: c, text: p.name });
+    if (geo.labelPoint) labels.push({ coordinates: geo.labelPoint, text: p.name, id: p.id });
   }
 
   const layers = [];
 
-  // 政权疆域填充层（可点击 → 信息卡）
+  // 政权疆域填充层（可点击 → 信息卡）。描边色=填充色 → 内部省界隐形、只显外轮廓。
   if (polityFeatures.length) {
     layers.push(
       new GeoJsonLayer({
@@ -140,18 +112,20 @@ export function buildChinaHistLayers(opts) {
         filled: true,
         getFillColor: (f) => {
           const c = f.properties.color;
-          const p = polityById(f.properties.id);
-          const a = p ? alphaFor(p.start, p.end, year, 235) : 200;
-          return [c[0], c[1], c[2], a];
+          return [c[0], c[1], c[2], f.properties.alpha];
         },
-        getLineColor: [60, 25, 15, 235],
-        getLineWidth: 1.2,
+        // 描边与填充同色：内部省界被"吃掉"，只剩外轮廓
+        getLineColor: (f) => {
+          const c = f.properties.color;
+          return [c[0], c[1], c[2], 255];
+        },
+        getLineWidth: 1.4,
         lineWidthMinPixels: 1,
         pickable: true,
         autoHighlight: true,
-        highlightColor: [255, 255, 255, 60],
+        highlightColor: [255, 255, 255, 70],
         onClick: (info) => {
-          if (info.object && onPolityPick) onPolityPick(info.object.properties.id);
+          if (info.object && onPolityPick) onPolityPick(info.object.properties.polityId);
         },
       })
     );
@@ -192,7 +166,7 @@ export function buildChinaHistLayers(opts) {
     );
   }
 
-  // 政权名标签（盖在疆域之上）
+  // 政权名标签（极点内缩定位，永远落在疆域内部、不靠边）
   if (labels.length) {
     layers.push(
       new TextLayer({
@@ -200,13 +174,17 @@ export function buildChinaHistLayers(opts) {
         data: labels,
         getPosition: (d) => d.coordinates,
         getText: (d) => d.text,
-        getSize: 15,
-        getColor: [40, 25, 20, 250],
+        getSize: 16,
+        getColor: [255, 255, 255, 250],
         fontFamily: labelFontFamily,
         fontWeight: 700,
+        getPixelOffset: [0, 0],
         fontSettings: labelFontSettings,
         characterSet: labelChars,
         pickable: false,
+        stroke: true,
+        getStrokeColor: [40, 25, 20, 220],
+        strokeWidth: 2.2,
       })
     );
   }
@@ -219,14 +197,21 @@ export function buildChinaHistLayers(opts) {
 // 此时由「政权疆域」层呈现各并立政权。与政权疆域层分工：底图=大一统王朝轮廓，
 // 政权层=全部政权（含并立）+ 都城 + 标签 + 点击交互。
 export function buildChinaHistBaseLayers(opts) {
-  const { year, chinaOutlines } = opts || {};
+  const { year, chinaProvinces } = opts || {};
+  if (!chinaProvinces) return [];
   const acts = activePolities(year).filter((p) => p.type === 'central');
   if (!acts.length) return [];
   const feats = [];
   for (const p of acts) {
-    const geometry = resolveGeometry(p, chinaOutlines);
-    if (!geometry) continue;
-    feats.push({ type: 'Feature', properties: { id: p.id, name: p.name, color: p.color }, geometry });
+    const geo = buildPolityGeometries(p, chinaProvinces);
+    const a = alphaFor(p.start, p.end, year, 70);
+    for (const f of geo.features) {
+      feats.push({
+        type: 'Feature',
+        properties: { polityId: p.id, color: p.color, alpha: a },
+        geometry: f.geometry,
+      });
+    }
   }
   if (!feats.length) return [];
   return [
@@ -236,11 +221,13 @@ export function buildChinaHistBaseLayers(opts) {
       stroked: true,
       filled: true,
       getFillColor: (f) => {
-        const p = polityById(f.properties.id);
-        const a = p ? alphaFor(p.start, p.end, year, 70) : 60;
-        return [f.properties.color[0], f.properties.color[1], f.properties.color[2], a];
+        const c = f.properties.color;
+        return [c[0], c[1], c[2], f.properties.alpha];
       },
-      getLineColor: [90, 40, 25, 160],
+      getLineColor: (f) => {
+        const c = f.properties.color;
+        return [c[0], c[1], c[2], 255];
+      },
       getLineWidth: 1.1,
       lineWidthMinPixels: 0.8,
       pickable: false,
