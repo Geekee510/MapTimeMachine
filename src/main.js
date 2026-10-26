@@ -45,7 +45,7 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, region: true, relief: false, river: true, mountain: true, lake: false, basemapLand: false };
+const layersState = { territory: true, region: true, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
 let chinaDynasties = null; // china_dynasties.geojson 的 features 数组（省界拼接的疆域底图）
@@ -379,67 +379,68 @@ function geomLen(g) {
   return 0;
 }
 
-function buildRiverLayer() {
-  if (!rivers) return [];
+// 主要河流：只画河流线（不画名称）。名称由独立的 buildRiverLabelLayer 负责，
+// 面板上拆成「主要河流」与「河流名称」两个开关，可分别控制。
+function buildRiverLineLayer() {
+  if (!rivers) return null;
   const z = map ? map.getZoom() : 0;
-  const layers = [
-    new GeoJsonLayer({
-      id: 'river',
-      data: rivers,
-      stroked: true,
-      filled: false,
-      getLineColor: [30, 90, 170, 220],
-      lineWidthUnits: 'pixels',
-      getLineWidth: z > 4 ? 2.2 : 1.4, // 放大后略加粗
-      lineWidthMinPixels: 1,
-      pickable: false,
-    }),
-  ];
-  // 河流名称标签（放大到区域视图才显示，避免世界视图糊成一片）
-  // 注意：TextLayer 不能直接吃 FeatureCollection（只有 GeoJsonLayer 能解析 GeoJSON），
-  // 必须传 features 数组，否则标签层静默渲染为空。
-  if (z > 3) {
-    // 同一河流在 NE 数据里常被拆成多段（多个要素），每段都出标签会重叠。
-    // 按名称去重：每个名称只保留坐标最多（最长）的那段，取其几何中点作为标签锚点。
-    const byName = new Map();
-    for (const f of rivers.features) {
-      if (!f.geometry) continue;
-      const name = f.properties.name || f.properties.name_en;
-      if (!name) continue;
-      const len = geomLen(f.geometry);
-      const prev = byName.get(name);
-      if (!prev || len > prev.len) byName.set(name, { f, len });
-    }
-    const riverFeatures = [...byName.values()].map((o) => o.f);
-    layers.push(
-      new TextLayer({
-        id: 'river-label',
-        data: riverFeatures,
-        getPosition: (f) => {
-          const g = f.geometry;
-          if (!g) return [0, 0];
-          if (g.type === 'LineString') return g.coordinates[Math.floor(g.coordinates.length / 2)] || [0, 0];
-          if (g.type === 'MultiLineString' && g.coordinates[0])
-            return g.coordinates[0][Math.floor(g.coordinates[0].length / 2)] || [0, 0];
-          return [0, 0];
-        },
-        getText: (f) => {
-          const name = f.properties.name || f.properties.name_en || '';
-          return labelChinese ? zh(RIVER_ZH, name) : (f.properties.name_en || name);
-        },
-        getSize: 12,
-        getColor: [20, 60, 120, 255],
-        getPixelOffset: [0, -6],
-        fontFamily: LABEL_FONT_FAMILY,
-        fontWeight: 700,
-        fontSettings: labelFontSettings,
-        characterSet: labelChars,
-        updateTriggers: { getText: labelChinese }, // 防御：与山脉层同理，声明文字对开关的依赖
-        pickable: false,
-      })
-    );
+  return new GeoJsonLayer({
+    id: 'river',
+    data: rivers,
+    stroked: true,
+    filled: false,
+    getLineColor: [30, 90, 170, 220],
+    lineWidthUnits: 'pixels',
+    getLineWidth: z > 4 ? 2.2 : 1.4, // 放大后略加粗
+    lineWidthMinPixels: 1,
+    pickable: false,
+  });
+}
+
+// 河流名称标签（放大到区域视图才显示，避免世界视图糊成一片）。
+// 注意：TextLayer 不能直接吃 FeatureCollection（只有 GeoJsonLayer 能解析 GeoJSON），
+// 必须传 features 数组，否则标签层静默渲染为空。
+function buildRiverLabelLayer() {
+  if (!rivers || labelChars === 'auto') return null;
+  const z = map ? map.getZoom() : 0;
+  if (z <= 3) return null;
+  // 同一河流在 NE 数据里常被拆成多段（多个要素），每段都出标签会重叠。
+  // 按名称去重：每个名称只保留坐标最多（最长）的那段，取其几何中点作为标签锚点。
+  const byName = new Map();
+  for (const f of rivers.features) {
+    if (!f.geometry) continue;
+    const name = f.properties.name || f.properties.name_en;
+    if (!name) continue;
+    const len = geomLen(f.geometry);
+    const prev = byName.get(name);
+    if (!prev || len > prev.len) byName.set(name, { f, len });
   }
-  return layers;
+  const riverFeatures = [...byName.values()].map((o) => o.f);
+  return new TextLayer({
+    id: 'river-label',
+    data: riverFeatures,
+    getPosition: (f) => {
+      const g = f.geometry;
+      if (!g) return [0, 0];
+      if (g.type === 'LineString') return g.coordinates[Math.floor(g.coordinates.length / 2)] || [0, 0];
+      if (g.type === 'MultiLineString' && g.coordinates[0])
+        return g.coordinates[0][Math.floor(g.coordinates[0].length / 2)] || [0, 0];
+      return [0, 0];
+    },
+    getText: (f) => {
+      const name = f.properties.name || f.properties.name_en || '';
+      return labelChinese ? zh(RIVER_ZH, name) : (f.properties.name_en || name);
+    },
+    getSize: 12,
+    getColor: [20, 60, 120, 255],
+    getPixelOffset: [0, -6],
+    fontFamily: LABEL_FONT_FAMILY,
+    fontWeight: 700,
+    fontSettings: labelFontSettings,
+    characterSet: labelChars,
+    updateTriggers: { getText: labelChinese }, // 防御：与山脉层同理，声明文字对开关的依赖
+    pickable: false,
+  });
 }
 
 // 山脉/山峰：用 ScatterplotLayer 画点；放大到区域视图(zoom>2.5)时叠加名称标签
@@ -848,7 +849,14 @@ function updateLayers() {
       const rg = buildChinaRegionLayer();
       if (rg) layers.push(rg);
     }
-    if (layersState.river && rivers) layers.push(...buildRiverLayer());
+    if (layersState.river && rivers) {
+      const l = buildRiverLineLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.riverLabel && rivers) {
+      const l = buildRiverLabelLayer();
+      if (l) layers.push(l);
+    }
     if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
     if (layersState.lake && lakes) {
       const l = buildLakeLayer();
@@ -872,7 +880,12 @@ function updateLayers() {
     }
   }
   if (layersState.river && rivers) {
-    layers.push(...buildRiverLayer());
+    const l = buildRiverLineLayer();
+    if (l) layers.push(l);
+  }
+  if (layersState.riverLabel && rivers) {
+    const l = buildRiverLabelLayer();
+    if (l) layers.push(l);
   }
   if (layersState.mountain && mountains) {
     layers.push(...buildMountainLayers());
@@ -1026,6 +1039,8 @@ function setMode(m) {
     const ie0 = document.getElementById('info-events');
     if (ie0) { ie0.classList.add('hidden'); ie0.innerHTML = ''; }
   }
+  // 面板项随模式调整：「历代政区界」仅中国疆域模式有意义（世界模式隐藏该开关）
+  if (panel && panel.setMode) panel.setMode(m);
   if (m === 'china') {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
@@ -1143,6 +1158,8 @@ async function init() {
       },
       onReset: () => map.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 }),
     });
+    // 初始模式为世界地图：隐藏只对中国疆域生效的「历代政区界」开关
+    if (panel && panel.setMode) panel.setMode(mode);
     // 世界/中国模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));

@@ -74,7 +74,9 @@ export function flagOf(enName) {
 export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tRegion = document.getElementById('toggle-region');
+  const rowRegion = document.getElementById('row-region'); // 「历代政区界」整行（仅中国模式可见）
   const tRiver = document.getElementById('toggle-river');
+  const tRiverLabel = document.getElementById('toggle-river-label');
   const tMountain = document.getElementById('toggle-mountain');
   const tRelief = document.getElementById('toggle-relief');
   const tLake = document.getElementById('toggle-lake');
@@ -90,6 +92,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   tTerritory.addEventListener('change', () => onToggleLayer('territory', tTerritory.checked));
   tRegion?.addEventListener('change', () => onToggleLayer('region', tRegion.checked));
   tRiver.addEventListener('change', () => onToggleLayer('river', tRiver.checked));
+  tRiverLabel?.addEventListener('change', () => onToggleLayer('riverLabel', tRiverLabel.checked));
   tMountain.addEventListener('change', () => onToggleLayer('mountain', tMountain.checked));
   tRelief?.addEventListener('change', () => onToggleLayer('relief', tRelief.checked));
   tLake.addEventListener('change', () => onToggleLayer('lake', tLake.checked));
@@ -276,6 +279,12 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   }
 
   return {
+    // 视图模式切换时调整面板可用项：
+    // 「历代政区界」数据只覆盖中国，世界模式下该图层不参与渲染，故把整行开关隐藏，
+    // 避免用户在世界模式里勾选后毫无反应。
+    setMode(m) {
+      if (rowRegion) rowRegion.style.display = m === 'china' ? '' : 'none';
+    },
     showInfo(props) {
       lastProps = props;
       render(props);
