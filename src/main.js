@@ -45,7 +45,7 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, region: true, relief: false, river: true, mountain: true, lake: false, basemapLand: false };
+const layersState = { territory: true, outline: true, region: true, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
 let chinaDynasties = null; // china_dynasties.geojson 的 features 数组（省界拼接的疆域底图）
@@ -379,67 +379,68 @@ function geomLen(g) {
   return 0;
 }
 
-function buildRiverLayer() {
-  if (!rivers) return [];
+// 主要河流：只画河流线（不画名称）。名称由独立的 buildRiverLabelLayer 负责，
+// 面板上拆成「主要河流」与「河流名称」两个开关，可分别控制。
+function buildRiverLineLayer() {
+  if (!rivers) return null;
   const z = map ? map.getZoom() : 0;
-  const layers = [
-    new GeoJsonLayer({
-      id: 'river',
-      data: rivers,
-      stroked: true,
-      filled: false,
-      getLineColor: [30, 90, 170, 220],
-      lineWidthUnits: 'pixels',
-      getLineWidth: z > 4 ? 2.2 : 1.4, // 放大后略加粗
-      lineWidthMinPixels: 1,
-      pickable: false,
-    }),
-  ];
-  // 河流名称标签（放大到区域视图才显示，避免世界视图糊成一片）
-  // 注意：TextLayer 不能直接吃 FeatureCollection（只有 GeoJsonLayer 能解析 GeoJSON），
-  // 必须传 features 数组，否则标签层静默渲染为空。
-  if (z > 3) {
-    // 同一河流在 NE 数据里常被拆成多段（多个要素），每段都出标签会重叠。
-    // 按名称去重：每个名称只保留坐标最多（最长）的那段，取其几何中点作为标签锚点。
-    const byName = new Map();
-    for (const f of rivers.features) {
-      if (!f.geometry) continue;
-      const name = f.properties.name || f.properties.name_en;
-      if (!name) continue;
-      const len = geomLen(f.geometry);
-      const prev = byName.get(name);
-      if (!prev || len > prev.len) byName.set(name, { f, len });
-    }
-    const riverFeatures = [...byName.values()].map((o) => o.f);
-    layers.push(
-      new TextLayer({
-        id: 'river-label',
-        data: riverFeatures,
-        getPosition: (f) => {
-          const g = f.geometry;
-          if (!g) return [0, 0];
-          if (g.type === 'LineString') return g.coordinates[Math.floor(g.coordinates.length / 2)] || [0, 0];
-          if (g.type === 'MultiLineString' && g.coordinates[0])
-            return g.coordinates[0][Math.floor(g.coordinates[0].length / 2)] || [0, 0];
-          return [0, 0];
-        },
-        getText: (f) => {
-          const name = f.properties.name || f.properties.name_en || '';
-          return labelChinese ? zh(RIVER_ZH, name) : (f.properties.name_en || name);
-        },
-        getSize: 12,
-        getColor: [20, 60, 120, 255],
-        getPixelOffset: [0, -6],
-        fontFamily: LABEL_FONT_FAMILY,
-        fontWeight: 700,
-        fontSettings: labelFontSettings,
-        characterSet: labelChars,
-        updateTriggers: { getText: labelChinese }, // 防御：与山脉层同理，声明文字对开关的依赖
-        pickable: false,
-      })
-    );
+  return new GeoJsonLayer({
+    id: 'river',
+    data: rivers,
+    stroked: true,
+    filled: false,
+    getLineColor: [30, 90, 170, 220],
+    lineWidthUnits: 'pixels',
+    getLineWidth: z > 4 ? 2.2 : 1.4, // 放大后略加粗
+    lineWidthMinPixels: 1,
+    pickable: false,
+  });
+}
+
+// 河流名称标签（放大到区域视图才显示，避免世界视图糊成一片）。
+// 注意：TextLayer 不能直接吃 FeatureCollection（只有 GeoJsonLayer 能解析 GeoJSON），
+// 必须传 features 数组，否则标签层静默渲染为空。
+function buildRiverLabelLayer() {
+  if (!rivers || labelChars === 'auto') return null;
+  const z = map ? map.getZoom() : 0;
+  if (z <= 3) return null;
+  // 同一河流在 NE 数据里常被拆成多段（多个要素），每段都出标签会重叠。
+  // 按名称去重：每个名称只保留坐标最多（最长）的那段，取其几何中点作为标签锚点。
+  const byName = new Map();
+  for (const f of rivers.features) {
+    if (!f.geometry) continue;
+    const name = f.properties.name || f.properties.name_en;
+    if (!name) continue;
+    const len = geomLen(f.geometry);
+    const prev = byName.get(name);
+    if (!prev || len > prev.len) byName.set(name, { f, len });
   }
-  return layers;
+  const riverFeatures = [...byName.values()].map((o) => o.f);
+  return new TextLayer({
+    id: 'river-label',
+    data: riverFeatures,
+    getPosition: (f) => {
+      const g = f.geometry;
+      if (!g) return [0, 0];
+      if (g.type === 'LineString') return g.coordinates[Math.floor(g.coordinates.length / 2)] || [0, 0];
+      if (g.type === 'MultiLineString' && g.coordinates[0])
+        return g.coordinates[0][Math.floor(g.coordinates[0].length / 2)] || [0, 0];
+      return [0, 0];
+    },
+    getText: (f) => {
+      const name = f.properties.name || f.properties.name_en || '';
+      return labelChinese ? zh(RIVER_ZH, name) : (f.properties.name_en || name);
+    },
+    getSize: 12,
+    getColor: [20, 60, 120, 255],
+    getPixelOffset: [0, -6],
+    fontFamily: LABEL_FONT_FAMILY,
+    fontWeight: 700,
+    fontSettings: labelFontSettings,
+    characterSet: labelChars,
+    updateTriggers: { getText: labelChinese }, // 防御：与山脉层同理，声明文字对开关的依赖
+    pickable: false,
+  });
 }
 
 // 山脉/山峰：用 ScatterplotLayer 画点；放大到区域视图(zoom>2.5)时叠加名称标签
@@ -719,6 +720,13 @@ function buildChinaTerritoryLayer() {
     highlightColor: [255, 255, 255, 60],
     onClick: (info) => {
       chinaInfoOpen = true;
+      // 疆域层在政区层之下：政区数据空隙处的点击会落到这里。若坐标仍位于某个
+      // 政区多边形内（政区层因拾取次序/三角化等偶发未命中），优先弹政区卡。
+      const rp = regionPropsAtCoordinate(info.coordinate);
+      if (rp && panel) {
+        panel.showChinaRegion(rp, d);
+        return;
+      }
       if (panel) panel.showChinaInfo(d, info.object?.properties?.state, currentYear);
     },
   });
@@ -728,8 +736,11 @@ function buildChinaTerritoryLayer() {
 // 【已改为只描边、不填充】此前它与省界拼接层"双层实心叠加"，看起来像凭空多出一个图层：
 //   · 北宋：HB 的 Song Empire 轮廓会整块盖在辽、西夏、大理的分色之上；
 //   · 中华人民共和国：该轮廓缺台湾、西藏等，实心覆盖反而掩盖了我们省界清单里的完整版图。
-// 现在只作为"史实边界参考线"（褐色虚感细线）叠在疆域之上，既不遮挡分色也不缺块。
+// 现在只作为"史实边界参考线"（红色细线）叠在疆域之上，既不遮挡分色也不缺块。
 // 每个朝代可能有多个年代的轮廓（如清有 1700/1783/1800），取年份最接近当前年份的那个。
+// 注意：**中华人民共和国没有轮廓数据**——HB 的 1960 China 多边形缺西藏/台湾/海南
+// （已在 gen-china-outline.mjs 中剔除），此函数对该朝代返回 null，不画参考线；
+// 现代中国疆域一律以省界拼接层为准（该层含台湾、西藏、海南及南海诸岛）。
 function buildChinaOutlineLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d || !chinaOutlines || !chinaOutlines.length) return null;
@@ -743,37 +754,125 @@ function buildChinaOutlineLayer() {
     data: { type: 'FeatureCollection', features: [best] },
     stroked: true,
     filled: false, // 关键：不再用第二个实心多边形覆盖疆域层
-    getLineColor: [90, 30, 18, 220],
-    getLineWidth: 1.4,
-    lineWidthMinPixels: 1,
+    // 配色：先试过深褐 [90,30,18]、深靛紫 [96,58,142]，与砖红填充相比
+    // 明度差都不够（都偏暗），线条在色块上"陷"进去。
+    // 现改为高饱和正红 —— 既换了色相，也把明度提上来，双维度都能拉开距离。
+    getLineColor: [226, 36, 42, 250],
+    getLineWidth: 2.2,
+    lineWidthMinPixels: 1.4,
     pickable: false,
   });
+}
+
+// ── 政区要素与点包含检测（政区层 / 疆域层点击兜底 / 点击托底层共用）─────────
+// 当前朝代、当前年份应显示的政区要素（含 <3 时的整朝兜底，与渲染逻辑一致）
+function getChinaRegionFeats(d) {
+  if (!chinaRegions || !chinaRegions.length) return [];
+  let feats = chinaRegions.filter(
+    (f) => f.properties.dynasty === d.id && currentYear >= f.properties.beg && currentYear <= f.properties.end
+  );
+  // 兜底：某些朝代的政区年份区间覆盖不全（如唐末），过滤后过少则显示该朝代全部政区
+  if (feats.length < 3) feats = chinaRegions.filter((f) => f.properties.dynasty === d.id);
+  return feats;
+}
+
+// 射线法点包含检测（支持带内环洞的 Polygon / MultiPolygon）
+function pointInRing(pt, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function pointInGeometry(pt, geom) {
+  if (!geom) return false;
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+  for (const p of polys) {
+    if (p[0] && pointInRing(pt, p[0])) {
+      let inHole = false;
+      for (let k = 1; k < p.length; k++) if (pointInRing(pt, p[k])) inHole = true;
+      if (!inHole) return true;
+    }
+  }
+  return false;
+}
+
+// 点击坐标处的政区属性。仅当政区开关开启时参与匹配；
+// CHGIS 数据存在空隙（如西汉的江汉平原、东汉三国两晋的汉江流域大片无政区多边形），
+// 空隙处返回 null，由调用方回落到朝代卡。
+function regionPropsAtCoordinate(coord) {
+  if (!layersState.region || !coord) return null;
+  const d = getDynastyAtYear(currentYear);
+  if (!d) return null;
+  for (const f of getChinaRegionFeats(d)) {
+    if (pointInGeometry(coord, f.geometry)) return f.properties;
+  }
+  return null;
 }
 
 // 历代政区界层：CHGIS 州/郡/府/路，只描边不填充，叠在疆域轮廓之上
 // （谭其骧《中国历史地图集》式呈现：疆域范围 + 内部政区界）
 function buildChinaRegionLayer() {
   const d = getDynastyAtYear(currentYear);
-  if (!d || !chinaRegions || !chinaRegions.length) return null;
-  let feats = chinaRegions.filter(
-    (f) => f.properties.dynasty === d.id && currentYear >= f.properties.beg && currentYear <= f.properties.end
-  );
-  // 兜底：某些朝代的政区年份区间覆盖不全（如唐末），过滤后过少则显示该朝代全部政区
-  if (feats.length < 3) feats = chinaRegions.filter((f) => f.properties.dynasty === d.id);
+  if (!d) return null;
+  const feats = getChinaRegionFeats(d);
   if (!feats.length) return null;
   return new GeoJsonLayer({
     id: 'china-regions',
     data: { type: 'FeatureCollection', features: feats },
     stroked: true,
-    filled: false, // 只画界线，避免与疆域填充叠色
+    // 【拾取关键】必须 filled:true，哪怕填充几乎全透明。
+    // filled:false 时多边形内部不渲染任何片元，只有 0.5~0.8px 宽的描边可命中
+    // → 表现为"点政区内没反应，只有刚好点在界线上才弹卡片"。
+    // 拾取有效性由 picking 着色器的有效性标志决定、与填充透明度无关（已核对
+    // deck.gl v9 picking 模块源码），因此 alpha=1 的隐形填充可让整块区域可点击，
+    // 同时保持"只看见界线"的观感（1/255 的着色肉眼不可辨）。
+    filled: true,
+    getFillColor: [110, 60, 35, 1],
     getLineColor: [110, 60, 35, 170],
     getLineWidth: 0.8,
     lineWidthMinPixels: 0.5,
     pickable: true,
+    autoHighlight: true,
+    highlightColor: [226, 36, 42, 70], // 悬停即泛红：明确告诉用户"这块可以点"
     onClick: (info) => {
       if (!info.object || !panel) return;
       chinaInfoOpen = true;
       panel.showChinaRegion(info.object.properties, d);
+    },
+  });
+}
+
+// 隐形点击托底层：垫在中国模式所有图层最下。
+// CHGIS 政区数据有空隙（汉江流域、江汉平原等大片无政区多边形），当「历史疆域」
+// 关闭时空隙处的点击不再有任何层接住（deck.gl 只回调"被命中"图层的 onClick），
+// 表现为"点了没反应"。此层用疆域要素做一层几乎透明的填充接住疆域范围内的全部点击：
+// 命中政区多边形 → 政区卡；落在数据空隙 → 朝代卡。
+// 仅当政区开关开启时存在（用户显式关掉政区界时不改变任何点击行为）。
+function buildChinaClickCatcher() {
+  if (!layersState.region) return null;
+  const d = getDynastyAtYear(currentYear);
+  if (!d || !chinaDynasties) return null;
+  const feats = chinaDynasties.filter(
+    (f) => f.properties.id === d.id
+      && (f.properties.sStart == null || (currentYear >= f.properties.sStart && currentYear <= f.properties.sEnd))
+  );
+  if (!feats.length) return null;
+  return new GeoJsonLayer({
+    id: 'china-click-catcher',
+    data: { type: 'FeatureCollection', features: feats },
+    filled: true,
+    stroked: false,
+    getFillColor: [0, 0, 0, 1], // alpha=1：隐形但可拾取（有效性标志与 alpha 无关）
+    pickable: true,
+    autoHighlight: false,
+    onClick: (info) => {
+      if (!panel || !info.coordinate) return;
+      chinaInfoOpen = true;
+      const rp = regionPropsAtCoordinate(info.coordinate);
+      if (rp) panel.showChinaRegion(rp, d);
+      else panel.showChinaInfo(d, null, currentYear);
     },
   });
 }
@@ -834,21 +933,35 @@ function updateLayers() {
   const layers = [];
   if (mode === 'china') {
     // 中国历代疆域：朝代疆域 + 都城，河流/山脉/湖泊作背景（按面板开关）
+    // 隐形点击托底层垫在最下：疆域关闭时政区数据空隙处的点击也有响应
+    const catcher = buildChinaClickCatcher();
+    if (catcher) layers.push(catcher);
     if (layersState.territory) {
       // 疆域填充：省界拼接底图【始终绘制】（台湾 / 西藏 / 外蒙古等在我们自己维护的
       // 省份清单里，historical-basemaps 的王朝轮廓常缺这些地区，早期版本用轮廓
       // “替代”底图导致台湾、西藏长期不显示）；王朝轮廓在其上叠加，二者取并集。
       const t = buildChinaTerritoryLayer();
       if (t) layers.push(t);
+      layers.push(...buildChinaCapitalLayer());
+    }
+    // 史实边界参考线：独立开关（不依赖「历史疆域」填充开关，
+    // 便于只看轮廓、关掉填充对比时使用）
+    if (layersState.outline) {
       const ol = buildChinaOutlineLayer();
       if (ol) layers.push(ol);
-      layers.push(...buildChinaCapitalLayer());
     }
     if (layersState.region) {
       const rg = buildChinaRegionLayer();
       if (rg) layers.push(rg);
     }
-    if (layersState.river && rivers) layers.push(...buildRiverLayer());
+    if (layersState.river && rivers) {
+      const l = buildRiverLineLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.riverLabel && rivers) {
+      const l = buildRiverLabelLayer();
+      if (l) layers.push(l);
+    }
     if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
     if (layersState.lake && lakes) {
       const l = buildLakeLayer();
@@ -872,7 +985,12 @@ function updateLayers() {
     }
   }
   if (layersState.river && rivers) {
-    layers.push(...buildRiverLayer());
+    const l = buildRiverLineLayer();
+    if (l) layers.push(l);
+  }
+  if (layersState.riverLabel && rivers) {
+    const l = buildRiverLabelLayer();
+    if (l) layers.push(l);
   }
   if (layersState.mountain && mountains) {
     layers.push(...buildMountainLayers());
@@ -894,7 +1012,30 @@ function updateYearLabel() {
 function addOverlayOnce() {
   if (deckOverlay || !map) return;
   try {
-    deckOverlay = new MapboxOverlay({ interleaved: false, layers: [] });
+    // 悬停提示：仅对「历代政区界」生效，鼠标移到某块政区上就显示"名称（类型）"，
+    // 让用户先知道这里可以点（此前无任何 hover 反馈，很容易误判为图层没生效）。
+    deckOverlay = new MapboxOverlay({
+      interleaved: false,
+      layers: [],
+      getTooltip: ({ object, layer }) => {
+        if (!object || layer?.id !== 'china-regions') return null;
+        const p = object.properties;
+        if (!p?.name) return null;
+        const fy = (y) => (y < 0 ? `前${-y}` : `${y}`);
+        return {
+          text: `${p.name}${p.type ? `（${p.type}）` : ''}\n${p.dynastyName || ''} ${fy(p.beg)}–${fy(p.end)}`,
+          style: {
+            background: 'rgba(28,24,20,0.92)',
+            color: '#f5efe6',
+            fontSize: '12px',
+            padding: '6px 9px',
+            borderRadius: '4px',
+            whiteSpace: 'pre-line',
+            pointerEvents: 'none',
+          },
+        };
+      },
+    });
     map.addControl(deckOverlay);
     updateLayers();
   } catch (e) {
@@ -1026,6 +1167,8 @@ function setMode(m) {
     const ie0 = document.getElementById('info-events');
     if (ie0) { ie0.classList.add('hidden'); ie0.innerHTML = ''; }
   }
+  // 面板项随模式调整：「历代政区界」仅中国疆域模式有意义（世界模式隐藏该开关）
+  if (panel && panel.setMode) panel.setMode(m);
   if (m === 'china') {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
@@ -1143,6 +1286,8 @@ async function init() {
       },
       onReset: () => map.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 }),
     });
+    // 初始模式为世界地图：隐藏只对中国疆域生效的「历代政区界」开关
+    if (panel && panel.setMode) panel.setMode(mode);
     // 世界/中国模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));

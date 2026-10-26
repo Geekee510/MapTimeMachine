@@ -73,8 +73,12 @@ export function flagOf(enName) {
 
 export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tTerritory = document.getElementById('toggle-territory');
+  const tOutline = document.getElementById('toggle-outline');
   const tRegion = document.getElementById('toggle-region');
+  // 分隔线 + 中国疆域专属图层整块（世界模式下整体隐藏，含分隔线本身）
+  const groupChina = document.getElementById('group-china');
   const tRiver = document.getElementById('toggle-river');
+  const tRiverLabel = document.getElementById('toggle-river-label');
   const tMountain = document.getElementById('toggle-mountain');
   const tRelief = document.getElementById('toggle-relief');
   const tLake = document.getElementById('toggle-lake');
@@ -88,8 +92,10 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   let lastProps = null; // 当前展示的对象（国家 or 山脉），用于年份/语言变化时刷新
 
   tTerritory.addEventListener('change', () => onToggleLayer('territory', tTerritory.checked));
+  tOutline?.addEventListener('change', () => onToggleLayer('outline', tOutline.checked));
   tRegion?.addEventListener('change', () => onToggleLayer('region', tRegion.checked));
   tRiver.addEventListener('change', () => onToggleLayer('river', tRiver.checked));
+  tRiverLabel?.addEventListener('change', () => onToggleLayer('riverLabel', tRiverLabel.checked));
   tMountain.addEventListener('change', () => onToggleLayer('mountain', tMountain.checked));
   tRelief?.addEventListener('change', () => onToggleLayer('relief', tRelief.checked));
   tLake.addEventListener('change', () => onToggleLayer('lake', tLake.checked));
@@ -276,6 +282,12 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   }
 
   return {
+    // 面板按视图模式分组：分隔线以上为公共图层（两种模式都有效）；
+    // 分隔线以下（史实边界参考线 / 历代政区界）数据只覆盖中国，世界模式整体隐藏，
+    // 连分隔线一起收起，避免面板出现一条空线。
+    setMode(m) {
+      if (groupChina) groupChina.style.display = m === 'china' ? '' : 'none';
+    },
     showInfo(props) {
       lastProps = props;
       render(props);
