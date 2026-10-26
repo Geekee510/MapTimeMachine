@@ -73,6 +73,8 @@ export function flagOf(enName) {
 
 export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tTerritory = document.getElementById('toggle-territory');
+  const tOutline = document.getElementById('toggle-outline');
+  const rowOutline = document.getElementById('row-outline'); // 「史实边界参考线」整行（仅中国模式可见）
   const tRegion = document.getElementById('toggle-region');
   const rowRegion = document.getElementById('row-region'); // 「历代政区界」整行（仅中国模式可见）
   const tRiver = document.getElementById('toggle-river');
@@ -90,6 +92,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   let lastProps = null; // 当前展示的对象（国家 or 山脉），用于年份/语言变化时刷新
 
   tTerritory.addEventListener('change', () => onToggleLayer('territory', tTerritory.checked));
+  tOutline?.addEventListener('change', () => onToggleLayer('outline', tOutline.checked));
   tRegion?.addEventListener('change', () => onToggleLayer('region', tRegion.checked));
   tRiver.addEventListener('change', () => onToggleLayer('river', tRiver.checked));
   tRiverLabel?.addEventListener('change', () => onToggleLayer('riverLabel', tRiverLabel.checked));
@@ -280,10 +283,12 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
 
   return {
     // 视图模式切换时调整面板可用项：
-    // 「历代政区界」数据只覆盖中国，世界模式下该图层不参与渲染，故把整行开关隐藏，
-    // 避免用户在世界模式里勾选后毫无反应。
+    // 「史实边界参考线」与「历代政区界」的数据只覆盖中国，世界模式下这两个图层
+    // 不参与渲染，故把整行开关隐藏，避免用户在世界模式里勾选后毫无反应。
     setMode(m) {
-      if (rowRegion) rowRegion.style.display = m === 'china' ? '' : 'none';
+      const chinaOnly = m === 'china' ? '' : 'none';
+      if (rowOutline) rowOutline.style.display = chinaOnly;
+      if (rowRegion) rowRegion.style.display = chinaOnly;
     },
     showInfo(props) {
       lastProps = props;

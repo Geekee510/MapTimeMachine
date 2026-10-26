@@ -45,7 +45,7 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, region: true, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false };
+const layersState = { territory: true, outline: true, region: true, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
 let chinaDynasties = null; // china_dynasties.geojson 的 features 数组（省界拼接的疆域底图）
@@ -744,9 +744,12 @@ function buildChinaOutlineLayer() {
     data: { type: 'FeatureCollection', features: [best] },
     stroked: true,
     filled: false, // 关键：不再用第二个实心多边形覆盖疆域层
-    getLineColor: [90, 30, 18, 220],
-    getLineWidth: 1.4,
-    lineWidthMinPixels: 1,
+    // 配色：此前用深褐 [90,30,18]，与疆域填充的砖红 [178,84,58] 几乎同族，
+    // 用户难以分辨"哪条线是参考线"。改为深靛紫 —— 与填充（砖红）、河流（蓝）、
+    // 政区界（褐）三个已有色系都不冲突，一眼能看出是"叠加的参考图层"。
+    getLineColor: [96, 58, 142, 240],
+    getLineWidth: 1.8,
+    lineWidthMinPixels: 1.2,
     pickable: false,
   });
 }
@@ -841,9 +844,13 @@ function updateLayers() {
       // “替代”底图导致台湾、西藏长期不显示）；王朝轮廓在其上叠加，二者取并集。
       const t = buildChinaTerritoryLayer();
       if (t) layers.push(t);
+      layers.push(...buildChinaCapitalLayer());
+    }
+    // 史实边界参考线：独立开关（不依赖「历史疆域」填充开关，
+    // 便于只看轮廓、关掉填充对比时使用）
+    if (layersState.outline) {
       const ol = buildChinaOutlineLayer();
       if (ol) layers.push(ol);
-      layers.push(...buildChinaCapitalLayer());
     }
     if (layersState.region) {
       const rg = buildChinaRegionLayer();
