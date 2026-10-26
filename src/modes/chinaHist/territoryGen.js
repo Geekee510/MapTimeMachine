@@ -106,6 +106,14 @@ export function buildPolityGeometries(polity, seg, ctx = {}) {
   if (cached) return cached;
 
   const { provinceFeatures, preqinFeatures } = ctx;
+
+  // ⚠️ 数据尚未到位时不缓存：否则会把"空几何"缓存下来，之后省界/先秦几何
+  // 加载完成也再不会重算（首屏切换模式时的异步加载竞态）。
+  const needProvinces = (seg?.provinces || []).length > 0 && seg.provinces.some((k) => k !== '蒙古');
+  const needPreqin = !!seg?.rawKey;
+  const missing = (needProvinces && !provinceFeatures) || (needPreqin && !preqinFeatures);
+  if (missing) return { features: [], labelPoint: seg?.capitalCoord || [104, 36] };
+
   const features = [];
 
   // 1) 省界并集（主体）

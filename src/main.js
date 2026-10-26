@@ -8,6 +8,7 @@ import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.
 import { polityDesc, fallbackDesc, regionOf } from './data/polity-desc.js';
 import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
 import { dissolveFeatures } from './lib/geo.js';
+import { clearTerritoryCache } from './modes/chinaHist/territoryGen.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
 import { createPanel } from './ui/panel.js';
@@ -1359,6 +1360,7 @@ async function loadChinaProvinces() {
       const gj = await res.json();
       chinaProvinces = gj.features || [];
       console.info(`[chinahist] 已加载当代省界底板 ${chinaProvinces.length} 个要素`);
+      clearTerritoryCache(); // 省界到位后必须清缓存，否则疆域沿用"无数据"时空结果
       if (mode === 'chinaHist') updateLayers();
     } else {
       console.warn('[chinahist] 当代省界底板拉取失败（HTTP ' + res.status + '），参考线将不显示');
@@ -1377,6 +1379,7 @@ async function loadChinaPreqin() {
       const gj = await res.json();
       chinaPreqin = gj.features || [];
       console.info(`[chinahist] 已加载先秦真实几何 ${chinaPreqin.length} 个要素`);
+      clearTerritoryCache(); // 先秦几何到位后同理，让夏/西周的疆域重新生成
       if (mode === 'chinaHist') updateLayers();
     } else {
       console.warn('[chinahist] 未找到 china_preqin.geojson（夏/西周疆域将不显示）');
