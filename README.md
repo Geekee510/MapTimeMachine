@@ -116,20 +116,22 @@ npm run preview
 | `china_provinces.geojson` | 阿里云 DataV.GeoAtlas 省级行政区划边界 | DataV 使用条款（学习 / 公益，禁商用转售） | 随仓库 / `npm run gen-china` 前置 |
 | `china_dynasties.geojson` | 夏—清—民国—共和国疆域：秦以后按省界拼接，先秦为手绘示意、战国为七雄政权分立 | 同上（**示意性近似**疆域，先秦极粗略） | `npm run gen-china` 生成 |
 | `china_hist/*.json`（21 个） | **CHGIS** 中国历代政区（州 / 郡 / 府 / 路），含 `beg_yr` / `end_yr` | 见 [第七节](#七许可license) | 随仓库（`public/data/china_hist/`） |
-| `china_regions.geojson` | 由上者生成：2165 个政区单元，按 `beg`–`end` 逐年过滤（只描边不填充） | 同上 | `npm run gen-china-regions` |
-| `china_outline.geojson` | 汉 / 唐 / 宋 / 元 / 明 / 清 / 现代**真实王朝轮廓**（含西域、外蒙古），15 个要素 | **CC BY-SA 4.0** | `npm run gen-china-outline`（CDN 拉取） |
+| `china_regions.geojson` | 由上者生成：2165 个政区单元，按 `beg`–`end` 逐年过滤（描边为主，填充近乎透明仅供点击拾取） | 同上 | `npm run gen-china-regions` |
+| `china_outline.geojson` | 汉 / 唐 / 宋 / 元 / 明 / 清 **真实王朝轮廓**（含西域、外蒙古，元/明/清补入西藏，明/清补入台湾海南），14 个要素 | **CC BY-SA 4.0** | `npm run gen-china-outline`（CDN 拉取） |
 | `world_YYYY.geojson`（前3000–1886） | historical-basemaps 年代快照 | **CC BY-SA 4.0** | **运行时按需从 jsDelivr 拉取**，不随仓库 |
+| 国旗 SVG（271 个） | flag-icons | MIT | 随仓库 `public/flags/` |
+| 地形晕渲瓦片 | Amazon Terrain Tiles（Terrarium 编码） | 见 [AWS 条款](https://registry.opendata.aws/terrain-tiles/) | **运行时在线请求**，无需 Key |
+
+`china_dynasties.geojson` 与 `china_regions.geojson` 属**构建时生成的中间产物**，已加入 `.gitignore`、不随仓库提交，克隆后需执行 `npm run gen-china && npm run gen-china-regions`（离线可跑），CI 构建时自动生成。
 
 ### 开发分支（dev/data-upgrade）数据说明
 
-> ⚠️ 本开发分支为**精简开发分支**，为减小仓库体积（约 26MB），**不包含** `public/data/cshapes-2.1.geojson` 历史疆域数据文件。
+> ⚠️ 开发分支为**精简开发分支**，为减小仓库体积（约 26MB），**不包含** `public/data/cshapes-2.1.geojson` 历史疆域数据文件。
 > 世界地图模式（1886–2023）依赖该文件；如需在本地运行世界模式，请先手动补回：
 > 1. 从 `main` 分支或 `v1.0.0` 发布标签中复制 `cshapes-2.1.geojson` 到 `public/data/`；**或**
 > 2. 从 CShapes 官方项目（<https://cshapes.org>，数据集 Weidmann et al. 2010，CC BY-NC-SA 4.0）获取 CShapes 2.1，放置为 `public/data/cshapes-2.1.geojson`。
 >
 > 中国历代疆域模式与河流 / 山脉 / 湖泊等自然地理图层**不受影响**，无需该文件。`main` 分支与发布版本均已内置 CShapes 数据，可直接克隆运行与部署。
-| 国旗 SVG（271 个） | flag-icons | MIT | 随仓库 `public/flags/` |
-| 地形晕渲瓦片 | Amazon Terrain Tiles（Terrarium 编码） | 见 [AWS 条款](https://registry.opendata.aws/terrain-tiles/) | **运行时在线请求**，无需 Key |
 
 `scripts/fetch-data.mjs` 会从 GitHub raw（jsDelivr 兜底）拉取 Natural Earth 数据并做字段裁剪。
 中国历代疆域采用**三层混合**方案，优先级依次为：真实王朝轮廓 → 省界拼接 → 手绘示意（仅先秦）。
