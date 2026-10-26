@@ -86,6 +86,9 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tZh = document.getElementById('toggle-zh');
   const tPolity = document.getElementById('toggle-polity');
   const tProvince = document.getElementById('toggle-province');
+  const tPass = document.getElementById('toggle-pass');
+  const tCity = document.getElementById('toggle-city');
+  const tWar = document.getElementById('toggle-war');
   const resetBtn = document.getElementById('reset-view');
   const info = document.getElementById('info');
   const infoClose = document.getElementById('info-close');
@@ -105,6 +108,9 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   tZh.addEventListener('change', () => onToggleLayer('zh', tZh.checked));
   tPolity?.addEventListener('change', () => onToggleLayer('polity', tPolity.checked));
   tProvince?.addEventListener('change', () => onToggleLayer('provinceRef', tProvince.checked));
+  tPass?.addEventListener('change', () => onToggleLayer('pass', tPass.checked));
+  tCity?.addEventListener('change', () => onToggleLayer('city', tCity.checked));
+  tWar?.addEventListener('change', () => onToggleLayer('war', tWar.checked));
   resetBtn.addEventListener('click', onReset);
   const closeInfo = () => {
     info.classList.add('hidden');
@@ -300,6 +306,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
         territory: tTerritory, outline: tOutline, region: tRegion, river: tRiver,
         riverLabel: tRiverLabel, mountain: tMountain, relief: tRelief, lake: tLake,
         basemapLand: tBasemap, zh: tZh, polity: tPolity, provinceRef: tProvince,
+        pass: tPass, city: tCity, war: tWar,
       };
       for (const k in map) {
         const el = map[k];
@@ -394,6 +401,28 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     rerender() {
       // 守卫：卡片处于关闭状态（如模式切换后）时不得借刷新重新弹出
       if (lastProps && !info.classList.contains('hidden')) render(lastProps);
+    },
+    // 第三模式「中国历史地图」：关隘 / 城市 / 战役 通用信息卡
+    // p 由 features.js 的 passCard/cityCard/battleCard 归一化：{name, kind, desc, lines:[[k,v]...]}
+    showPlace(p) {
+      if (!p) {
+        info.classList.add('hidden');
+        hideEvents();
+        lastProps = null;
+        return;
+      }
+      lastProps = null; // 静态卡：不参与世界模式 rerender
+      const nameEl = document.getElementById('info-name');
+      const body = document.getElementById('info-body');
+      nameEl.textContent = p.kind ? `${p.name}（${p.kind}）` : p.name;
+      const rows = [];
+      for (const [k, v] of p.lines || []) {
+        if (v) rows.push(`<div><span class="k">${k}：</span>${v}</div>`);
+      }
+      if (p.desc) rows.push(`<div><span class="k">简介：</span>${p.desc}</div>`);
+      body.innerHTML = rows.join('');
+      info.classList.remove('hidden');
+      hideEvents();
     },
     // 第三模式「中国历史地图」：政权信息卡（存续/都城/类型/简介/重大事件）
     showPolity(p) {

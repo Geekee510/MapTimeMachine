@@ -18,6 +18,15 @@ import {
   CHINA_HIST_MIN,
   CHINA_HIST_MAX,
 } from './modes/chinaHist/index.js';
+import {
+  buildPassLayers,
+  buildCityLayers,
+  buildWarLayers,
+  activeWarSpan,
+  passCard,
+  cityCard,
+  battleCard,
+} from './modes/chinaHist/features.js';
 
 const YEAR_MIN = -3000; // 世界模式下限：公元前 3000 年（此前为史前考古文化，不做政治疆域）
 const YEAR_MAX = 2023;
@@ -53,15 +62,23 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, zh: true };
+
+// —— 第三模式「战争」军队演进动画状态 ——
+let warTime = null;        // 战争动画时间轴（年，可含小数表月/季）
+let warRaf = null;         // requestAnimationFrame 句柄
+let warSpan = null;        // 当前进行中战争的时间跨度 {start,end}
+let histStaticLayers = []; // chinaHist 静态图层缓存（战争层逐帧叠在其上，避免整层重建）
+let lastWarTs = 0;
+const WAR_SECONDS = 7;     // 一场战争演进动画的时长（秒）
+const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, war: false, zh: true };
 
 // 各模式进入时的图层默认（切到该模式即套用，并同步面板勾选）。
 // 中国历史模式默认：历史疆域 / 主要河流 / 地形渲染 / 中文标签 / 政权疆域 开，其余关；
 // 另加「当代省界(参考)」作为浅色无交互参考底板，默认开。
 const MODE_LAYER_DEFAULTS = {
-  world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, zh: true },
-  china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, zh: true },
-  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  zh: true },
+  world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, war: false, zh: true },
+  china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, war: false, zh: true },
+  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: false, city: false, war: false, zh: true },
 };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
@@ -949,6 +966,44 @@ function buildChinaCapitalLayer() {
   return layers;
 }
 
+// 停止战争动画循环
+function stopWarAnim() {
+  if (warRaf) {
+    cancelAnimationFrame(warRaf);
+    warRaf = null;
+  }
+}
+
+// 确保战争动画循环在运行：仅当处于 chinaHist 且战争层开启且当年有战争时。
+// 每帧只重建战争图层（TripsLayer + 战役点），静态图层复用缓存，避免全量重绘。
+function ensureWarAnim() {
+  if (!(mode === 'chinaHist' && layersState.war && warSpan && deckOverlay)) {
+    stopWarAnim();
+    return;
+  }
+  if (warRaf) return;
+  lastWarTs = performance.now();
+  const tick = (ts) => {
+    if (mode !== 'chinaHist' || !layersState.war || !warSpan) {
+      warRaf = null;
+      return;
+    }
+    const dt = Math.min(0.1, (ts - lastWarTs) / 1000); // 限幅，防切回时跳帧
+    lastWarTs = ts;
+    const speed = (warSpan.end - warSpan.start) / WAR_SECONDS; // 一场战争约 WAR_SECONDS 秒演完
+    warTime += dt * speed;
+    if (warTime > warSpan.end + 0.8) warTime = warSpan.start; // 循环播放
+    const warLayers = buildWarLayers(currentYear, warTime, {
+      labelChars,
+      labelFontSettings,
+      labelFontFamily: LABEL_FONT_FAMILY,
+    });
+    deckOverlay.setProps({ layers: [...histStaticLayers, ...warLayers] });
+    warRaf = requestAnimationFrame(tick);
+  };
+  warRaf = requestAnimationFrame(tick);
+}
+
 function updateLayers() {
   if (!deckOverlay) return;
   const layers = [];
@@ -1032,7 +1087,51 @@ function updateLayers() {
       });
       layers.push(...hist);
     }
+    // 关隘（独立图层，可点击看简介）
+    if (layersState.pass) {
+      layers.push(
+        ...buildPassLayers({
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          onPick: (p) => { if (panel) panel.showPlace(passCard(p)); },
+        })
+      );
+    }
+    // 城市 / 治所（独立图层，可点击看简介）
+    if (layersState.city) {
+      layers.push(
+        ...buildCityLayers({
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          onPick: (c) => { if (panel) panel.showPlace(cityCard(c)); },
+        })
+      );
+    }
+    // 战争：静态层先缓存，战争层（军队路线/战役点）由动画循环逐帧追加
+    histStaticLayers = layers.slice();
+    if (layersState.war) {
+      warSpan = activeWarSpan(currentYear);
+      if (warSpan) {
+        if (warTime == null || warTime < warSpan.start || warTime > warSpan.end + 0.8) {
+          warTime = warSpan.start;
+        }
+        layers.push(
+          ...buildWarLayers(currentYear, warTime, {
+            labelChars,
+            labelFontSettings,
+            labelFontFamily: LABEL_FONT_FAMILY,
+            onBattlePick: (b) => { if (panel) panel.showPlace(battleCard(b)); },
+          })
+        );
+      }
+    } else {
+      warSpan = null;
+      warTime = null;
+    }
     deckOverlay.setProps({ layers });
+    ensureWarAnim();
     return;
   }
   // 世界模式
@@ -1259,6 +1358,7 @@ function getYearEvents(y) {
 
 function setMode(m) {
   mode = m;
+  stopWarAnim(); // 切换模式时停止战争动画循环（离开 chinaHist 后不再逐帧重绘）
   document.getElementById('mode-world')?.classList.toggle('active', m === 'world');
   document.getElementById('mode-china')?.classList.toggle('active', m === 'china');
   document.getElementById('mode-chinahist')?.classList.toggle('active', m === 'chinaHist');
