@@ -64,6 +64,7 @@
         <label id="row-city"><input type="checkbox" id="toggle-city" /> 城市</label>
         <label id="row-war"><input type="checkbox" id="toggle-war" /> 战争（军队演进）</label>
         <label id="row-province"><input type="checkbox" id="toggle-province" checked /> 当代省界（参考线）</label>
+        <button id="btn-war-list" type="button">⚔ 战争列表</button>
       </div>
       <button id="reset-view">复位视图</button>
       <div class="panel-note">底图：MapLibre demotiles（含陆地/水域/国界）<br/>疆域：CShapes 2.1（CC BY-NC-SA）<br/>河流/山脉/湖泊：Natural Earth（公共领域，需先运行 <code>npm run fetch-data</code>）</div>
@@ -86,6 +87,16 @@
 
     <!-- 世界大事浮层（点击时间轴年份读数时弹出） -->
     <div id="world-events" class="hidden"></div>
+
+    <!-- 战争列表页（第三幅图：选中某场战争 → 跳转并单独回放军队演进） -->
+    <div id="war-list" class="hidden">
+      <div class="wl-head">
+        <span class="wl-title">⚔ 历代战争 · 点击回放</span>
+        <button id="war-list-close" type="button">×</button>
+      </div>
+      <div id="war-list-body"></div>
+      <div class="wl-foot">选中后自动跳到该年、开启战争层并单独播放该场战争</div>
+    </div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

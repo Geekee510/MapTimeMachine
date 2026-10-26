@@ -28,7 +28,12 @@ import {
   passCard,
   cityCard,
   battleCard,
+  warCard,
 } from './modes/chinaHist/features.js';
+import { warById, warView, WARS } from './modes/chinaHist/wars.js';
+import { PASSES } from './modes/chinaHist/passes.js';
+import { CITIES } from './modes/chinaHist/cities.js';
+import { createWarList } from './ui/warList.js';
 
 const YEAR_MIN = -3000; // 世界模式下限：公元前 3000 年（此前为史前考古文化，不做政治疆域）
 const YEAR_MAX = 2023;
@@ -71,7 +76,12 @@ let warRaf = null;         // requestAnimationFrame 句柄
 let warSpan = null;        // 当前进行中战争的时间跨度 {start,end}
 let histStaticLayers = []; // chinaHist 静态图层缓存（战争层逐帧叠在其上，避免整层重建）
 let lastWarTs = 0;
-const WAR_SECONDS = 7;     // 一场战争演进动画的时长（秒）
+let warHoldAcc = 0;        // 一场战争演完后在终点停留的累计秒数
+let focusWarId = null;     // 战争列表页'选中某场战争'时的单独回放目标（null=当年全部战争）
+let selectedPassId = null; // 当前选中的关隘（地图上显示光环）
+let warList = null;        // 战争列表页实例
+const WAR_SECONDS = 16;    // 一场战争演进动画的时长（秒，放慢便于看清路线）
+const WAR_END_HOLD = 2.2;  // 演完在终点停留（秒）后再循环
 const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, war: false, zh: true };
 
 // 各模式进入时的图层默认（切到该模式即套用，并同步面板勾选）。
@@ -680,6 +690,14 @@ function computeLabelChars() {
     if (d.states) for (const s of d.states) { add(s.name); add(s.capital); } // 并立政权名/都城
   }
   for (const v of HB_ZH_VALUES) add(v); // 1886 年前的历史政权译名（如"阿拔斯王朝"）
+  // 第三幅图的关隘/城市/战争文本：不在字符集里会渲染成豆腐块（此前关隘名偶发缺字）
+  for (const p of PASSES) add(p.name);
+  for (const c of CITIES) add(c.name);
+  for (const w of WARS) {
+    add(w.meta.title);
+    for (const pt of w.parties || []) { add(pt.short); add(pt.name); }
+    for (const b of w.battles || []) add(b.name);
+  }
   labelChars = [...s];
   detectMaxAtlasHeight();
   labelFontSettings = pickFontSettings(s.size);
@@ -1019,7 +1037,7 @@ function stopWarAnim() {
 }
 
 // 确保战争动画循环在运行：仅当处于 chinaHist 且战争层开启且当年有战争时。
-// 每帧只重建战争图层（TripsLayer + 战役点），静态图层复用缓存，避免全量重绘。
+// 每帧只重建战争图层（路线/箭头/队头/交战点），静态图层复用缓存，避免全量重绘。
 function ensureWarAnim() {
   if (!(mode === 'chinaHist' && layersState.war && warSpan && deckOverlay)) {
     stopWarAnim();
@@ -1035,17 +1053,51 @@ function ensureWarAnim() {
     const dt = Math.min(0.1, (ts - lastWarTs) / 1000); // 限幅，防切回时跳帧
     lastWarTs = ts;
     const speed = (warSpan.end - warSpan.start) / WAR_SECONDS; // 一场战争约 WAR_SECONDS 秒演完
-    warTime += dt * speed;
-    if (warTime > warSpan.end + 0.8) warTime = warSpan.start; // 循环播放
+    if (warTime >= warSpan.end) {
+      // 演完先停留一会儿（让人看清终局的对阵与地名），再从头循环
+      warHoldAcc += dt;
+      if (warHoldAcc >= WAR_END_HOLD) {
+        warHoldAcc = 0;
+        warTime = warSpan.start;
+      }
+    } else {
+      warTime = Math.min(warSpan.end, warTime + dt * speed);
+    }
     const warLayers = buildWarLayers(currentYear, warTime, {
       labelChars,
       labelFontSettings,
       labelFontFamily: LABEL_FONT_FAMILY,
+      focusWarId,
     });
     deckOverlay.setProps({ layers: [...histStaticLayers, ...warLayers] });
     warRaf = requestAnimationFrame(tick);
   };
   warRaf = requestAnimationFrame(tick);
+}
+
+// 战争列表页选中某场战争 → 跳到该年、开战争层、聚焦战区、单独回放该场
+// （军队演进动画由 ensureWarAnim 驱动；focusWarId 让当年只演这一场）
+function jumpToWar(warId) {
+  const w = warById(warId);
+  if (!w) return;
+  if (mode !== 'chinaHist') setMode('chinaHist');
+  focusWarId = w.id;
+  layersState.war = true; // 打开战争层
+  if (panel && panel.syncCheckboxes) panel.syncCheckboxes(layersState);
+  const y = Math.floor(w.meta.start);
+  currentYear = y;
+  warSpan = activeWarSpan(y, focusWarId);
+  warTime = w.meta.start;
+  warHoldAcc = 0;
+  // setRange 内部会触发 onYear → updateLayers（顺带刷新年份大字与时间轴滑块）
+  if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, y);
+  stopWarAnim();
+  updateLayers();
+  const v = warView(w);
+  if (map) map.flyTo({ center: v.center, zoom: v.zoom, duration: 1100 });
+  if (panel) panel.showPlace(warCard(w)); // 顺手把这场战争的背景卡摊开
+  warList?.setActive(w.id);
+  warList?.close();
 }
 
 function updateLayers() {
@@ -1111,8 +1163,10 @@ function updateLayers() {
       const l = buildLakeLayer();
       if (l) layers.push(l);
     }
-    // 历史疆域（中央王朝底图，轻量无交互）
-    if (layersState.territory) {
+    // 历史疆域（中央王朝底图，轻量无交互）：
+    // 「政权疆域」已覆盖全部政权（含中央王朝），两层同时开会把填充叠两遍 → 颜色变深、
+    // 下面的省界线又看不清。故政权层开启时不再画这层底图，只在其关闭时兜底。
+    if (layersState.territory && !layersState.polity) {
       const base = buildChinaHistBaseLayers({ year: currentYear, chinaProvinces, chinaPreqin });
       if (base && base.length) layers.push(...base);
     }
@@ -1132,14 +1186,19 @@ function updateLayers() {
       });
       layers.push(...hist);
     }
-    // 关隘（独立图层，可点击看简介）
+    // 关隘（城楼图标，可点选看背景）
     if (layersState.pass) {
       layers.push(
         ...buildPassLayers({
           labelChars,
           labelFontSettings,
           labelFontFamily: LABEL_FONT_FAMILY,
-          onPick: (p) => { if (panel) panel.showPlace(passCard(p)); },
+          selectedId: selectedPassId,
+          onPick: (p) => {
+            selectedPassId = p.id;
+            if (panel) panel.showPlace(passCard(p));
+            updateLayers(); // 重绘以显示选中光环
+          },
         })
       );
     }
@@ -1154,20 +1213,25 @@ function updateLayers() {
         })
       );
     }
-    // 战争：静态层先缓存，战争层（军队路线/战役点）由动画循环逐帧追加
+    // 战争：静态层先缓存，战争层（路线/箭头/队头/交战点）由动画循环逐帧追加
     histStaticLayers = layers.slice();
     if (layersState.war) {
-      warSpan = activeWarSpan(currentYear);
+      warSpan = activeWarSpan(currentYear, focusWarId);
       if (warSpan) {
         if (warTime == null || warTime < warSpan.start || warTime > warSpan.end + 0.8) {
           warTime = warSpan.start;
+          warHoldAcc = 0;
         }
         layers.push(
           ...buildWarLayers(currentYear, warTime, {
             labelChars,
             labelFontSettings,
             labelFontFamily: LABEL_FONT_FAMILY,
-            onBattlePick: (b) => { if (panel) panel.showPlace(battleCard(b)); },
+            focusWarId,
+            onBattlePick: (b) => {
+              warList?.setActive(b.warId);
+              if (panel) panel.showPlace(battleCard(b)); // 交战点 → 整场战争的背景卡
+            },
           })
         );
       }
@@ -1432,6 +1496,10 @@ function setMode(m) {
   chinaInfoOpen = false;
   histInfoOpen = false;
   histLastPolityId = null;
+  // 战争"单独回放"与关隘选中都是跨模式的状态，切模式时一并清掉，避免下次进来还锁着
+  focusWarId = null;
+  selectedPassId = null;
+  warList?.close();
   // 关闭介绍卡：必须走 panel.hide() 清空内部 lastProps 状态。
   // 此前只直接给 DOM 加 hidden，lastProps 仍在，之后任意图层开关触发 rerender()
   // 会把上一模式的国家卡重新弹出来（世界点国家→切中国→取消历史疆域→弹框）。
@@ -1551,6 +1619,11 @@ async function init() {
             if (p && p.alpha > 0) panel.showPolity(p);
             else { histInfoOpen = false; panel.hide(); }
           }
+          // 拖离该场战争所在年份 → 解除"单独回放"，恢复当年全部战争
+          if (focusWarId) {
+            const fw = warById(focusWarId);
+            if (!fw || y < Math.floor(fw.meta.start) || y > Math.ceil(fw.meta.end)) focusWarId = null;
+          }
         } else if (panel) {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
           // 则换成该时段的属性重绘（存续/历时/事件随之更新）；已不存在则清空介绍卡。
@@ -1579,6 +1652,10 @@ async function init() {
     });
     panel = createPanel({
       rulerName, // 宗主国/占领国查询（殖民地/保护国/托管地/被占领土卡片显示"被谁统治"）
+      onWarList: () => {
+        if (mode !== 'chinaHist') return; // 列表只服务第三幅图
+        warList?.toggle();
+      },
       onToggleLayer: (k, v) => {
         if (k === 'zh') {
           labelChinese = v;
@@ -1594,6 +1671,10 @@ async function init() {
     });
     // 初始模式为世界地图：隐藏只对中国疆域生效的「历代政区界」开关
     if (panel && panel.setMode) panel.setMode(mode);
+    // 战争列表页（第三幅图）：选中 → jumpToWar
+    warList = createWarList({ onSelect: (id) => jumpToWar(id) });
+    const warBtn = document.getElementById('btn-war-list');
+    if (warBtn) warBtn.textContent = `⚔ 战争列表（${WARS.length}）`;
     // 世界/中国/中国历史 模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));

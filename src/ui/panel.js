@@ -71,7 +71,7 @@ export function flagOf(enName) {
   return FLAGS[base] || '';
 }
 
-export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
+export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onWarList }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tOutline = document.getElementById('toggle-outline');
   const tRegion = document.getElementById('toggle-region');
@@ -111,6 +111,10 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   tPass?.addEventListener('change', () => onToggleLayer('pass', tPass.checked));
   tCity?.addEventListener('change', () => onToggleLayer('city', tCity.checked));
   tWar?.addEventListener('change', () => onToggleLayer('war', tWar.checked));
+  // 第三幅图：战争列表页入口（面板按钮，仅中国历史模式显示）
+  document.getElementById('btn-war-list')?.addEventListener('click', () => {
+    if (onWarList) onWarList();
+  });
   resetBtn.addEventListener('click', onReset);
   const closeInfo = () => {
     info.classList.add('hidden');
