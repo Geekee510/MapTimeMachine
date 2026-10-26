@@ -71,7 +71,7 @@ export function flagOf(enName) {
   return FLAGS[base] || '';
 }
 
-export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onWarList, onExitWar }) {
+export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onWarList, onExitWar, onReplayWar }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tOutline = document.getElementById('toggle-outline');
   const tRegion = document.getElementById('toggle-region');
@@ -97,6 +97,8 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
   const warPlaying = document.getElementById('war-playing');
   const warPlayingName = document.getElementById('war-playing-name');
   const warPlayingExit = document.getElementById('war-playing-exit');
+  const warPlayingReplay = document.getElementById('war-playing-replay');
+  const panelWar = document.getElementById('panel-war');
 
   let lastProps = null; // 当前展示的对象（国家 or 山脉），用于年份/语言变化时刷新
 
@@ -128,8 +130,10 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
     btnHelp?.classList.remove('active');
   });
   warPlayingExit?.addEventListener('click', () => { if (onExitWar) onExitWar(); });
-  // 第三幅图：战争列表页入口（面板按钮，仅中国历史模式显示）
-  document.getElementById('btn-war-list')?.addEventListener('click', () => {
+  warPlayingReplay?.addEventListener('click', () => { if (onReplayWar) onReplayWar(); });
+  // 第三幅图：战争列表页入口（独立"战争"面板，仅中国历史模式显示）
+  const btnWarList = document.getElementById('btn-war-list');
+  btnWarList?.addEventListener('click', () => {
     if (onWarList) onWarList();
   });
   resetBtn.addEventListener('click', onReset);
@@ -320,6 +324,8 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
       if (groupChina) groupChina.style.display = m === 'china' ? '' : 'none';
       const groupHist = document.getElementById('group-chinahist');
       if (groupHist) groupHist.style.display = m === 'chinaHist' ? '' : 'none';
+      // 战争卡独立成块：只有中国历史模式需要（其他模式整块隐藏）
+      if (panelWar) panelWar.classList.toggle('hidden', m !== 'chinaHist');
     },
     // 由 main.setMode 在切换模式后调用：把图层默认同步到面板勾选框
     syncCheckboxes(state) {

@@ -25,7 +25,6 @@ import {
   warBattlePins,
   buildCityLayers,
   buildWarLayers,
-  activeWarSpan,
   passCard,
   cityCard,
   battleCard,
@@ -73,9 +72,12 @@ let panel = null;
 let timeline = null; // 时间轴控件引用
 
 // —— 第三模式「战争」军队演进动画状态 ——
-let warTime = null;        // 战争动画时间轴（年，可含小数表月/季）
+// 回放进度用 0..1 归一化，而不是"年份"。年份驱动会有两个副作用：
+//   ① 史料跨度只有 1~2 个月的战争（数据里写成 0.05 年）演得极快；
+//   ② 旧版给跨度加了 0.12 年兜底，行进终点因此超出 meta.end，时间轴先到头，
+//      军队只走到 42%~52% 就停住 —— 也就是"动画到一半就停了"。
+let warProgress = null;    // 战争回放进度（0..1，null=不在回放）
 let warRaf = null;         // requestAnimationFrame 句柄
-let warSpan = null;        // 当前进行中战争的时间跨度 {start,end}
 let histStaticLayers = []; // chinaHist 静态图层缓存（战争层逐帧叠在其上，避免整层重建）
 let lastWarTs = 0;
 let warHoldAcc = 0;        // 一场战争演完后在终点停留的累计秒数
@@ -84,7 +86,7 @@ let selectedPassId = null; // 当前选中的关隘（地图上显示选中态�
 let warList = null;        // 战争列表页实例
 let pinLayer = null;       // 关隘/交战点图钉层（MapLibre Marker 池）
 const WAR_SECONDS = 16;    // 一场战争演进动画的时长（秒，放慢便于看清路线）
-const WAR_END_HOLD = 2.2;  // 演完在终点停留（秒）后再循环
+const WAR_END_HOLD = 2.6;  // 演完在终点停留（秒）后再循环
 const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true };
 
 // 各模式进入时的图层默认（切到该模式即套用，并同步面板勾选）。
@@ -1039,34 +1041,33 @@ function stopWarAnim() {
   }
 }
 
-// 确保战争动画循环在运行：仅当处于 chinaHist、正回放某场战争（focusWarId）且有跨度时。
+// 确保战争动画循环在运行：仅当处于 chinaHist、正回放某场战争（focusWarId）。
 // 每帧只重建战争图层（路线/箭头/队头），静态图层复用缓存，避免全量重绘。
 function ensureWarAnim() {
-  if (!(mode === 'chinaHist' && focusWarId && warSpan && deckOverlay)) {
+  if (!(mode === 'chinaHist' && focusWarId && deckOverlay)) {
     stopWarAnim();
     return;
   }
   if (warRaf) return;
   lastWarTs = performance.now();
   const tick = (ts) => {
-    if (mode !== 'chinaHist' || !focusWarId || !warSpan) {
+    if (mode !== 'chinaHist' || !focusWarId) {
       warRaf = null;
       return;
     }
     const dt = Math.min(0.1, (ts - lastWarTs) / 1000); // 限幅，防切回时跳帧
     lastWarTs = ts;
-    const speed = (warSpan.end - warSpan.start) / WAR_SECONDS; // 一场战争约 WAR_SECONDS 秒演完
-    if (warTime >= warSpan.end) {
+    if (warProgress >= 1) {
       // 演完先停留一会儿（让人看清终局的对阵与地名），再从头循环
       warHoldAcc += dt;
       if (warHoldAcc >= WAR_END_HOLD) {
         warHoldAcc = 0;
-        warTime = warSpan.start;
+        warProgress = 0;
       }
     } else {
-      warTime = Math.min(warSpan.end, warTime + dt * speed);
+      warProgress = Math.min(1, (warProgress ?? 0) + dt / WAR_SECONDS);
     }
-    const warLayers = buildWarLayers(currentYear, warTime, {
+    const warLayers = buildWarLayers(currentYear, warProgress, {
       labelChars,
       labelFontSettings,
       labelFontFamily: LABEL_FONT_FAMILY,
@@ -1079,15 +1080,23 @@ function ensureWarAnim() {
   warRaf = requestAnimationFrame(tick);
 }
 
-// 结束战争回放（回到"只看疆域"的状态）
+// 重播：进度归零，动画循环若已停则重新拉起
+function replayWar() {
+  if (!focusWarId) return;
+  warProgress = 0;
+  warHoldAcc = 0;
+  updateLayers(); // 重绘到起点，并确保动画循环在跑
+}
+
+// 结束战争回放（回到"只看疆域"的状态）：图层、图钉、列表高亮、状态条一并清掉
 function exitWar() {
   if (!focusWarId) return;
   focusWarId = null;
-  warSpan = null;
-  warTime = null;
+  warProgress = null;
   warHoldAcc = 0;
   stopWarAnim();
   warList?.setActive(null);
+  panel?.setWarPlaying?.(null);
   updateLayers();
 }
 
@@ -1100,8 +1109,7 @@ function jumpToWar(warId) {
   focusWarId = w.id;
   const y = Math.floor(w.meta.start);
   currentYear = y;
-  warSpan = activeWarSpan(y, focusWarId);
-  warTime = w.meta.start;
+  warProgress = 0;
   warHoldAcc = 0;
   // setRange 内部会触发 onYear → updateLayers（顺带刷新年份大字与时间轴滑块）
   if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, y);
@@ -1111,7 +1119,7 @@ function jumpToWar(warId) {
   if (map) map.flyTo({ center: v.center, zoom: v.zoom, duration: 1100 });
   if (panel) {
     panel.showPlace(warCard(w)); // 顺手把这场战争的背景卡摊开
-    panel.setWarPlaying(w.meta.title); // 面板显示"回放中 · 退出"
+    panel.setWarPlaying(w.meta.title); // 战争面板显示"回放中 + 重播/退出"
   }
   warList?.setActive(w.id);
   warList?.close();
@@ -1240,25 +1248,18 @@ function updateLayers() {
     // 静态层先缓存，战争层（路线/箭头/队头）由动画循环逐帧追加
     histStaticLayers = layers.slice();
     if (focusWarId) {
-      warSpan = activeWarSpan(currentYear, focusWarId);
-      if (warSpan) {
-        if (warTime == null || warTime < warSpan.start || warTime > warSpan.end + 0.8) {
-          warTime = warSpan.start;
-          warHoldAcc = 0;
-        }
-        layers.push(
-          ...buildWarLayers(currentYear, warTime, {
-            labelChars,
-            labelFontSettings,
-            labelFontFamily: LABEL_FONT_FAMILY,
-            focusWarId,
-            zoom: map ? map.getZoom() : 4,
-          })
-        );
-      }
+      if (warProgress == null) warProgress = 0;
+      layers.push(
+        ...buildWarLayers(currentYear, warProgress, {
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          focusWarId,
+          zoom: map ? map.getZoom() : 4,
+        })
+      );
     } else {
-      warSpan = null;
-      warTime = null;
+      warProgress = null;
     }
     deckOverlay.setProps({ layers });
     ensureWarAnim();
@@ -1568,6 +1569,8 @@ function setMode(m) {
   histLastPolityId = null;
   // 战争"单独回放"与关隘选中都是跨模式的状态，切模式时一并清掉，避免下次进来还锁着
   focusWarId = null;
+  warProgress = null;
+  warHoldAcc = 0;
   selectedPassId = null;
   warList?.close();
   pinLayer?.clear(); // 图钉是 DOM，不随 deck 图层自动消失，必须显式清
@@ -1692,17 +1695,10 @@ async function init() {
             if (p && p.alpha > 0) panel.showPolity(p);
             else { histInfoOpen = false; panel.hide(); }
           }
-          // 拖离该场战争所在年份 → 结束回放
+          // 拖离该场战争所在年份 → 结束回放（exitWar 一并清图层/图钉/状态条）
           if (focusWarId) {
             const fw = warById(focusWarId);
-            if (!fw || y < Math.floor(fw.meta.start) || y > Math.ceil(fw.meta.end)) {
-              focusWarId = null;
-              warSpan = null;
-              warTime = null;
-              stopWarAnim();
-              warList?.setActive(null);
-              if (panel && panel.setWarPlaying) panel.setWarPlaying(null);
-            }
+            if (!fw || y < Math.floor(fw.meta.start) || y > Math.ceil(fw.meta.end)) exitWar();
           }
         } else if (panel) {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
@@ -1737,6 +1733,7 @@ async function init() {
         warList?.toggle();
       },
       onExitWar: () => exitWar(),
+      onReplayWar: () => replayWar(),
       onToggleLayer: (k, v) => {
         if (k === 'zh') {
           labelChinese = v;

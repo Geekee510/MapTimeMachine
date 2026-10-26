@@ -73,7 +73,7 @@ function traveledPath(route, frac) {
 
 // 末端箭头三角（地理坐标，但尺寸按当前 zoom 折算成固定像素）
 // 屏幕像素 → 经纬度：经度 360/(256·2^z)；纬度再乘 cos(lat)（墨卡托的纵向拉伸）。
-function arrowTriangle(head, bearingDeg, zoom, lenPx = 22, widePx = 9) {
+function arrowTriangle(head, bearingDeg, zoom, lenPx = 14, widePx = 5.5) {
   const z = Number.isFinite(zoom) ? zoom : 4;
   const lat = (head[1] * Math.PI) / 180;
   const cos = Math.max(0.25, Math.cos(lat));
@@ -152,18 +152,6 @@ export function buildCityLayers(o = {}) {
   return layers;
 }
 
-// 当前年份进行中的战争的时间跨度（只服务"列表页选中某场"的单场回放）
-export function activeWarSpan(year, focusId) {
-  const ws = activeWars(year, focusId);
-  if (!ws.length) return null;
-  let start = Infinity, end = -Infinity;
-  for (const w of ws) {
-    if (w.meta.start < start) start = w.meta.start;
-    if (w.meta.end > end) end = w.meta.end;
-  }
-  return { start, end };
-}
-
 // 交战点图钉（只在回放某一场战争时出现）
 export function warBattlePins(year, focusId) {
   if (!focusId) return [];
@@ -185,18 +173,29 @@ export function warBattlePins(year, focusId) {
 
 // —— 战争动画图层（军队演进）——
 // 淡色完整路线 + 已行进粗线 + 末端箭头 + 队头点 + 军队名（交战点由图钉层画）
-export function buildWarLayers(year, time, o = {}) {
+// progress = 0..1 的**动画进度**（不再是年份）。按进度驱动的好处：无论一场战争
+// 在史料上只占 1 个月还是 3 年，回放时长都恒定，且不会因"年份跨度 < 最小跨度"
+// 让军队卡在半路（旧版就是因此停在中途）。
+export function buildWarLayers(year, progress, o = {}) {
   const ws = activeWars(year, o.focusWarId);
   if (!ws.length) return [];
+  const p = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
   const routes = [];
   for (const w of ws) {
     for (const f of w.forces) {
-      const party = w.parties.find((p) => p.id === f.party) || { color: '#888888', name: f.party, short: f.party };
-      const t0 = f.t0 ?? w.meta.start;
-      const t1 = f.t1 ?? w.meta.end;
-      const frac = t1 > t0 ? Math.max(0, Math.min(1, (time - t0) / (t1 - t0))) : 1;
+      const party = w.parties.find((x) => x.id === f.party) || { color: '#888888', name: f.party, short: f.party };
+      const p0 = f.p0 ?? 0;
+      const p1 = f.p1 ?? 1;
+      const frac = p1 > p0 ? Math.max(0, Math.min(1, (p - p0) / (p1 - p0))) : 1;
       const { coordinates: traveled, head, headAngle } = traveledPath(f.route, frac);
       const color = hexToRgb(party.color);
+      // 出发点与战场重合（例：张巡守睢阳，守军本就在城里）→ 视为**驻守不动**：
+      // 不画路线、不画箭头，只留队头点与军队名。否则三个重合点会生成零长路线，
+      // 方位角退化成"正北"，在地图上留下一个莫名其妙的三角形。
+      let len = 0;
+      for (let i = 1; i < f.route.length; i++) {
+        len += Math.hypot(f.route[i][0] - f.route[i - 1][0], f.route[i][1] - f.route[i - 1][1]);
+      }
       routes.push({
         id: `${w.id}-${f.party}`,
         color,
@@ -204,20 +203,21 @@ export function buildWarLayers(year, time, o = {}) {
         traveled,
         head,
         headAngle,
+        static: len < 1e-6,
         label: party.short || party.name,
       });
     }
   }
 
   const heads = routes
-    .filter((r) => r.head && r.traveled.length > 1)
+    .filter((r) => r.head && !r.static && r.traveled.length > 1)
     .map((r) => ({ poly: arrowTriangle(r.head, r.headAngle, o.zoom), color: r.color }));
 
   const layers = [
     // 完整行军路线（淡色，示意整体走向）
     new PathLayer({
       id: 'chinahist-war-route-full',
-      data: routes,
+      data: routes.filter((r) => !r.static),
       getPath: (d) => d.full,
       getColor: (d) => [d.color[0], d.color[1], d.color[2], 90],
       getWidth: 2.2,
@@ -229,7 +229,7 @@ export function buildWarLayers(year, time, o = {}) {
     // 已行进路段（粗主干）
     new PathLayer({
       id: 'chinahist-war-route-traveled',
-      data: routes.filter((r) => r.traveled.length > 1),
+      data: routes.filter((r) => !r.static && r.traveled.length > 1),
       getPath: (d) => d.traveled,
       getColor: (d) => [d.color[0], d.color[1], d.color[2], 240],
       getWidth: 5,

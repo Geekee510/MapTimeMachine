@@ -27,26 +27,25 @@ const TOWER = `
 </svg>`;
 
 // 交叉双刀：同一把刀画两遍，绕中心分别转 ±45°，形成清晰的 X。
-// 刀身用"浅钢色 + 深色描边"，因为地图底色深浅不一（疆域填充 / 晕渲 / 省界），
-// 只靠浅色填充会在浅底上糊成一片；深描边保证任何底色下轮廓都在。
+// 配色取"高饱和 + 深描边"：地图底色深浅不一（疆域填充 / 晕渲 / 省界），
+// 浅灰钢色会在浅底上糊成一片，因此刀身用亮银蓝、护手与刀镡用明黄铜、
+// 刀柄用朱红棕，整体轮廓用近黑描边兜住。
 const BLADE = `
-  <path d="M20 2.6 L22.3 7.6 V21 H17.7 V7.6 Z" fill="#eaf1f8" stroke="#22303f" stroke-width="1.3" />
-  <path d="M20 5.4 V19.6" stroke="#9fb0c2" stroke-width="0.9" fill="none" />
-  <path d="M12.5 21.9 H27.5 L26.4 24.6 H13.6 Z" fill="#c9962e" stroke="#5f420d" stroke-width="1.1" />
-  <path d="M18.5 24.6 H21.5 V31 H18.5 Z" fill="#7a4a22" stroke="#3d2310" stroke-width="1" />
-  <circle cx="20" cy="32.4" r="2.3" fill="#c9962e" stroke="#5f420d" stroke-width="1.1" />
+  <path d="M20 1.8 L23 7.4 V21 H17 V7.4 Z" fill="#f4f9ff" stroke="#1b2836" stroke-width="1.5" />
+  <path d="M20 5 V19.6" stroke="#8fb3d9" stroke-width="1.1" fill="none" />
+  <path d="M11.4 21.6 H28.6 L27.2 25 H12.8 Z" fill="#ffc22e" stroke="#6b4406" stroke-width="1.3" />
+  <path d="M17.8 25 H22.2 V33.4 H17.8 Z" fill="#c8371c" stroke="#4a1006" stroke-width="1.2" />
+  <circle cx="20" cy="35.4" r="2.9" fill="#ffc22e" stroke="#6b4406" stroke-width="1.3" />
 `;
 
 const SWORDS = `
-<svg viewBox="0 0 40 40" width="31" height="31" aria-hidden="true">
+<svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
   <!-- 后方那把：整体压暗一点，制造前后层次 -->
-  <g transform="rotate(-45 20 20)" opacity="0.92">
-    <g fill="#c9d6e2" stroke="#22303f" stroke-width="1.3" stroke-linejoin="round">
-      <path d="M20 2.6 L22.3 7.6 V21 H17.7 V7.6 Z" />
-    </g>
-    <path d="M12.5 21.9 H27.5 L26.4 24.6 H13.6 Z" fill="#a87a1f" stroke="#4e3608" stroke-width="1.1" stroke-linejoin="round" />
-    <path d="M18.5 24.6 H21.5 V31 H18.5 Z" fill="#5f3a1a" stroke="#2e1a0b" stroke-width="1" />
-    <circle cx="20" cy="32.4" r="2.3" fill="#a87a1f" stroke="#4e3608" stroke-width="1.1" />
+  <g transform="rotate(-45 20 20)" opacity="0.9">
+    <path d="M20 1.8 L23 7.4 V21 H17 V7.4 Z" fill="#cfe0f2" stroke="#1b2836" stroke-width="1.5" stroke-linejoin="round" />
+    <path d="M11.4 21.6 H28.6 L27.2 25 H12.8 Z" fill="#d99a13" stroke="#5a3905" stroke-width="1.3" stroke-linejoin="round" />
+    <path d="M17.8 25 H22.2 V33.4 H17.8 Z" fill="#a02a13" stroke="#3d0d05" stroke-width="1.2" />
+    <circle cx="20" cy="35.4" r="2.9" fill="#d99a13" stroke="#5a3905" stroke-width="1.3" />
   </g>
   <!-- 前方那把 -->
   <g transform="rotate(45 20 20)" stroke-linejoin="round" stroke-linecap="round">

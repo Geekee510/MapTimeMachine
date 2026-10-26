@@ -4,7 +4,7 @@
 // **用户导入战争**（编辑器导出同构 JSON）共用：
 //   meta      { title, era, group, start, end, place, desc, result }
 //   parties   [{ id, name, short, color, troops }]        id 为 'a' / 'b'
-//   forces    [{ party, route:[[lng,lat]...], t0, t1 }]   按时间推进显示
+//   forces    [{ party, route:[[lng,lat]...], p0, p1 }]   p0/p1 = 0..1 动画进度（不是年份）
 //   battles   [{ name, at, loc, winner, desc }]
 //
 // 紧凑行字段：
@@ -399,7 +399,6 @@ function expand(r) {
   // 年份区间统一成 [早, 晚]。公元前写 [ -1046, -1046.05 ] 时后者在前，
   // 这里自动纠正，数据端不必纠结负数的"更晚"是更小还是更大。
   const [start, end] = r.y[0] <= r.y[1] ? r.y : [r.y[1], r.y[0]];
-  const span = Math.max(0.12, end - start);
   const loc = r.loc;
   const party = (key, raw, color) => {
     const [name, troops, from] = raw;
@@ -419,7 +418,7 @@ function expand(r) {
       to,
     ];
   };
-  const mkForce = (p, t0, t1) => ({ party: p.id, t0, t1, route: route(p.from, loc) });
+  const mkForce = (p, p0, p1) => ({ party: p.id, p0, p1, route: route(p.from, loc) });
   const a = party('a', r.a, A_COLOR);
   const b = party('b', r.b, B_COLOR);
   return {
@@ -433,8 +432,13 @@ function expand(r) {
     },
     parties: [a, b],
     forces: [
-      mkForce(a, start, start + span * 0.8),
-      mkForce(b, start + span * 0.1, start + span * 0.86),
+      // p0/p1 是**动画进度**（0..1），不是年份。
+      // 旧实现用年份 +「最小跨度 0.12 年」兜底：短战争（真实跨度 0.05~0.06 年）
+      // 的行进终点被算到 start+0.096，而时间轴只跑到 meta.end=start+0.05，
+      // 进度因此被封顶在 42%~52% —— 表现出来就是「军队走到一半不动了」。
+      // 改成归一化进度后，任何跨度的战争都按 WAR_SECONDS 演满全程。
+      mkForce(a, 0, 0.8),
+      mkForce(b, 0.1, 0.86),
     ],
     battles: [
       { name: r.t, at: end, loc, winner: r.w === 'b' ? 'b' : 'a', desc: r.r },
