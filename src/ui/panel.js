@@ -131,7 +131,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
   });
   warPlayingExit?.addEventListener('click', () => { if (onExitWar) onExitWar(); });
   warPlayingReplay?.addEventListener('click', () => { if (onReplayWar) onReplayWar(); });
-  // 第三幅图：战争列表页入口（独立"战争"面板，仅中国历史模式显示）
+  // 第三幅图：战争列表页入口（独立"战争"面板，仅中国古代史模式显示）
   const btnWarList = document.getElementById('btn-war-list');
   btnWarList?.addEventListener('click', () => {
     if (onWarList) onWarList();
@@ -324,7 +324,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
       if (groupChina) groupChina.style.display = m === 'china' ? '' : 'none';
       const groupHist = document.getElementById('group-chinahist');
       if (groupHist) groupHist.style.display = m === 'chinaHist' ? '' : 'none';
-      // 战争卡独立成块：只有中国历史模式需要（其他模式整块隐藏）
+      // 战争卡独立成块：只有中国古代史模式需要（其他模式整块隐藏）
       if (panelWar) panelWar.classList.toggle('hidden', m !== 'chinaHist');
     },
     // 由 main.setMode 在切换模式后调用：把图层默认同步到面板勾选框
@@ -440,7 +440,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
       // 守卫：卡片处于关闭状态（如模式切换后）时不得借刷新重新弹出
       if (lastProps && !info.classList.contains('hidden')) render(lastProps);
     },
-    // 第三模式「中国历史地图」：关隘 / 城市 / 战役 通用信息卡
+    // 第三模式「中国古代史」：关隘 / 城市 / 战役 通用信息卡
     // p 由 features.js 的 passCard/cityCard/battleCard 归一化：{name, kind, desc, lines:[[k,v]...]}
     showPlace(p) {
       if (!p) {
@@ -462,7 +462,7 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
       info.classList.remove('hidden');
       hideEvents();
     },
-    // 第三模式「中国历史地图」：政权信息卡（存续/都城/类型/简介/重大事件）
+    // 第三模式「中国古代史」：政权信息卡（存续/都城/类型/简介/重大事件）
     showPolity(p) {
       if (!p) {
         info.classList.add('hidden');

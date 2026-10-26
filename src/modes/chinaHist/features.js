@@ -13,7 +13,7 @@
 //   （中途试过"骑马小人"，40px 下细节糊成一团、且侧视剪影只能左右翻转无法表达
 //   南北向行军，已改回三角箭头。）
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
-import { PASSES, passById } from './passes.js';
+import { PASSES, passesAtYear, passById } from './passes.js';
 import { citiesAtYear, cityNameAt, cityAliasText, cityById } from './cities.js';
 import { WARS, activeWars, warById } from './wars.js';
 
@@ -94,8 +94,11 @@ const labelOpts = (o) => ({
 });
 
 // —— 关隘：返回地图图钉描述（渲染由 ui/pinLayer.js 负责）——
+// 按年份筛选：关隘有兴废，早于设置年不出现、废弃后也不再显示（见 passes.js）。
+// 未传年份（如数据自检脚本）时返回全部，避免把"年份缺失"误判成"全部隐藏"。
 export function passPins(o = {}) {
-  return PASSES.map((p) => ({
+  const list = Number.isFinite(o.year) ? passesAtYear(o.year) : PASSES;
+  return list.map((p) => ({
     id: `pass-${p.id}`,
     kind: 'pass',
     coord: p.coord,
@@ -301,19 +304,23 @@ export function buildWarLayers(year, progress, o = {}) {
 }
 
 // —— 卡片数据（供 panel.showPlace 统一渲染）——
-export function passCard(p) {
+const fyPass = (y) => (y < 0 ? `前${-y}` : `${y}`);
+export function passCard(p, year) {
   if (!p) return null;
-  return {
-    name: p.name,
-    kind: '关隘',
-    desc: p.desc,
-    lines: [
-      ['设置年代', p.since],
-      ['战略地位', p.role],
-      ['相关朝代', (p.dynasties || []).join(' / ')],
-      ['位置', `${p.coord[0].toFixed(2)}, ${p.coord[1].toFixed(2)}`],
-    ],
-  };
+  // 关隘有兴废：卡片上写清"何时设、何时废"，与地图上"按年出现/消失"对应
+  const span =
+    p.until == null
+      ? `${fyPass(p.from)} 年设立，沿用至今`
+      : `${fyPass(p.from)} 年设立，约 ${fyPass(p.until)} 年后废弃`;
+  const lines = [
+    ['设置年代', p.since],
+    ['存续', span],
+    ['战略地位', p.role],
+    ['相关朝代', (p.dynasties || []).join(' / ')],
+    ['位置', `${p.coord[0].toFixed(2)}, ${p.coord[1].toFixed(2)}`],
+  ];
+  if (Number.isFinite(year)) lines.splice(1, 0, ['当前年份', `${fyPass(year)} 年`]);
+  return { name: p.name, kind: '关隘', desc: p.desc, lines };
 }
 
 // 城市卡：标题用当前年份的城名（长安/大兴/西安随年份变），并列出全部曾用名

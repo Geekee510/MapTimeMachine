@@ -1,4 +1,4 @@
-// 第三幅地图「中国历史地图」核心模块（自包含，不改动 world/china 模式逻辑）
+// 第三幅地图「中国古代史」核心模块（自包含，不改动 world/china 模式逻辑）
 // 职责：按年份渲染各政权疆域、都城点、政权名标签，并提供信息卡数据与年份事件。
 //
 // 数据来自统一模型 src/data/polities（以 src/data/china.js 为唯一数据源，
@@ -8,17 +8,21 @@ import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { politiesAtYear, polityById, eraAtYear } from '../../data/polities/index.js';
 import { buildPolityGeometries } from './territoryGen.js';
 
-// 时间轴范围：**先秦传说上限（约前 2700）** 至明末清初前夜。
+// 时间轴范围：**先秦传说上限（约前 2700）** 至清亡前夜（1911）。
 // 下限不再卡在夏（前 2070）：战争库里"涿鹿之战"记在前 2600（上古传说），
 // 若下限是前 2070，跳转时年份会被夹到 -2070，超出该战 [前2600, 前2600] 的窗口，
 // → onYear 里"拖离战场年份就结束回放"的守卫立刻把回放踢掉，表现为"点了没演示"，
 // 而战争面板仍挂着"回放中"，于是退出按钮点了没反应。多给的 630 年没有政权数据，
 // 地图上只有底图与行军路线，正好用来放这一场传说战役。
-// 清代及以后的近代史由单独的地图承载，不在此模式内。
+//
+// 上限从 1644 延到 1911：清（1644–1912）是"中国古代史"的最后一朝，此前时间轴停在
+// 明末，清只在 1644 那一年露一下就等于没有。1912 起进入民国（polities 里标了 modern，
+// 由本模块过滤），所以上限取 1911——帝制最后一年，史段自然收口。
 export const CHINA_HIST_MIN = -2700;
-export const CHINA_HIST_MAX = 1644;
+export const CHINA_HIST_MAX = 1911;
 
 const FADE = 4; // 政权存续边界处的淡入/淡出年数（近似"扩张/更迭"过渡）
+const FADE_HALF = FADE / 2;
 
 // 疆域填充不透明度：刻意压低（235→105），让压在下面的当代省界参考线透出来；
 // 疆域边界改由 dissolve 外轮廓单独描边，所以"淡"不等于"糊"。
@@ -33,10 +37,23 @@ function fy(y) {
   return y < 0 ? `前${-y}` : `${y}`;
 }
 
-// 跨政权交叉淡入：存续边界年附近把不透明度从 0 渐变到目标值
+// 跨政权交叉淡入：存续边界年附近把不透明度从 0 渐变到目标值。
+//
+// 两个必须处理的边界：
+//   ① 交界年只有**新朝**被返回（currentEra 取最后一个命中的朝代，如 1644 只出清、
+//      不出明），若新朝在这一年 alpha=0，地图会整片空白一格。故淡入窗口以
+//      start 为中心（start-2 … start+2），交界年正好 50%。
+//   ② 时间轴上边界（清）不是"灭亡"而是"史段到此为止"：若照常淡出，
+//      1909–1911 会几乎全透明、1911 年直接 0，清朝等于看不见。故 end ≥ 上限时
+//      不做淡出，一律按满不透明度绘制。
 function alphaFor(start, end, year, base) {
-  if (year < start + FADE) return Math.round(base * Math.max(0, (year - start) / FADE));
-  if (year > end - FADE) return Math.round(base * Math.max(0, (end - year) / FADE));
+  if (end < CHINA_HIST_MAX && year > end - FADE_HALF) {
+    return Math.round(base * Math.max(0, (end + FADE_HALF - year) / FADE));
+  }
+  if (year < start + FADE_HALF) {
+    // 交界年以 0.7 起步（而非 0）：这一年只画新朝，0 会让整幅地图空一格。
+    return Math.round(base * Math.min(1, 0.7 + (year - start) / FADE));
+  }
   return base;
 }
 

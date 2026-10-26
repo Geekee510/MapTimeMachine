@@ -15,7 +15,7 @@
     <div id="mode-switch">
       <button id="mode-world" class="active" type="button">世界地图</button>
       <button id="mode-china" type="button">中国疆域</button>
-      <button id="mode-chinahist" type="button">中国历史</button>
+      <button id="mode-chinahist" type="button">中国古代史</button>
     </div>
 
     <!-- 加载提示 -->
@@ -52,6 +52,7 @@
         <div>中国疆域：现代行政区划拼接 + historical-basemaps 王朝轮廓（CC BY-SA）</div>
         <div>河流/山脉/湖泊：Natural Earth（公共领域）</div>
         <div>关隘/城市/战争：公开史料整理，位置为示意精度</div>
+        <div>关隘按设置年代出现（废弃后不再显示）；城名随朝代变化</div>
       </div>
       <!-- 公共图层：世界地图 / 中国疆域 两种模式都生效 -->
       <label><input type="checkbox" id="toggle-territory" checked /> 历史疆域</label>
@@ -113,7 +114,7 @@
     <!-- 世界大事浮层（点击时间轴年份读数时弹出） -->
     <div id="world-events" class="hidden"></div>
 
-    <!-- 战争列表页（第三幅图：选中某场战争 → 跳转并单独回放军队演进） -->
+    <!-- 战争列表页（中国古代史：选中某场战争 → 跳转并单独回放军队演进） -->
     <div id="war-list" class="hidden">
       <div class="wl-head">
         <span class="wl-title">⚔ 历代战争 · 点击回放</span>

@@ -61,6 +61,18 @@ const WORLD_ZOOM = 1.4;
 const CHINA_CENTER = [104, 36]; // 中国大致中心（华北/中原一带）
 const CHINA_ZOOM = 3.6;
 
+// 每幅地图自己的"本位视图"（复位视图 + 切模式进入时都用它）。
+// 之前三幅图都共用 WORLD_CENTER/WORLD_ZOOM：在中国疆域或中国古代史里点"复位视图"
+// 会一路缩到全球，等于把当前这幅图的视角丢掉。现在按图区分：
+//   世界地图    → 全球（z1.4）
+//   中国疆域    → 全国（z3.6，含新疆/西藏/台湾）
+//   中国古代史  → 中原—关中的"历史核心区"（z4.0，长安/洛阳/开封一带）
+const MODE_VIEW = {
+  world:     { center: WORLD_CENTER, zoom: WORLD_ZOOM, pitch: 0, bearing: 0 },
+  china:     { center: CHINA_CENTER, zoom: CHINA_ZOOM, pitch: 0, bearing: 0 },
+  chinaHist: { center: [108.6, 34.4], zoom: 4.0, pitch: 0, bearing: 0 },
+};
+
 let currentYear = 1960;
 let territories = [];
 let rivers = null; // 可选：Natural Earth 河流 GeoJSON
@@ -90,12 +102,12 @@ const WAR_END_HOLD = 2.6;  // 演完在终点停留（秒）后再循环
 const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true };
 
 // 各模式进入时的图层默认（切到该模式即套用，并同步面板勾选）。
-// 中国历史模式默认：历史疆域 / 主要河流 / 地形渲染 / 中文标签 / 政权疆域 开，其余关；
-// 另加「当代省界(参考)」作为浅色无交互参考底板，默认开。
+// 中国古代史默认：历史疆域 / 主要河流 / 地形渲染 / 中文标签 / 政权疆域 / 当代省界 /
+// 关隘 / 城市 开，其余关。关隘与城市是这个模式的主内容（可点击看背景），所以默认开。
 const MODE_LAYER_DEFAULTS = {
   world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true },
   china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true },
-  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: false, city: false, zh: true },
+  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: true,  city: true,  zh: true },
 };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
@@ -107,7 +119,7 @@ let chinaProvincesLoaded = false; // 是否已触发过省界加载（懒加载�
 let chinaPreqin = null; // china_preqin.geojson：夏/西周的真实几何（historical-basemaps，CC BY-SA）
 let chinaPreqinLoaded = false; // 是否已触发过先秦几何加载（懒加载，仅一次）
 let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
-let histInfoOpen = false; // 第三模式（中国历史地图）信息卡是否打开
+let histInfoOpen = false; // 第三模式（中国古代史）信息卡是否打开
 let histLastPolityId = null; // 当前展示的政权 id（年份拖动时刷新该卡）
 
 // 底图陆地显隐：CShapes 疆域数据不含小岛屿，底图(demotiles)却会画出
@@ -1117,7 +1129,10 @@ function jumpToWar(warId) {
   // 年份必须夹在时间轴范围内：setRange → setYear 会自己做一次夹取，
   // 若这里传的范围外年份（如涿鹿 前2600 而时间轴本来从前2070 起），
   // onYear 收到的是被夹过的年份，与战争窗口对不上，回放会被立刻结束。
-  const y = Math.min(CHINA_HIST_MAX, Math.max(CHINA_HIST_MIN, Math.round(w.meta.start)));
+  // 取整用 trunc 而不是 round：数据里的 -1046.05 / 1645.5 是"某年内的时点"，
+  // 小数只是年内位置，截掉即该年（round 会把 1645.5 显示成 1646）。
+  const rawY = Math.trunc(w.meta.start);
+  const y = Math.min(CHINA_HIST_MAX, Math.max(CHINA_HIST_MIN, rawY));
   currentYear = y;
   warProgress = 0;
   warHoldAcc = 0;
@@ -1145,13 +1160,16 @@ function syncPins() {
     return;
   }
   const pins = [];
-  if (layersState.pass) pins.push(...passPins({ selectedId: selectedPassId }));
+  if (layersState.pass) {
+    // 关隘按年份筛选：早于设置年不出现、废弃后消失（见 passes.js）
+    pins.push(...passPins({ year: currentYear, selectedId: selectedPassId }));
+  }
   if (focusWarId) pins.push(...warPins(currentYear, warProgress ?? 0, { focusWarId }));
   pinLayer.sync(pins, {
     onClick: (pin) => {
       if (pin.kind === 'pass') {
         selectedPassId = pin.payload.id;
-        if (panel) panel.showPlace(passCard(pin.payload));
+        if (panel) panel.showPlace(passCard(pin.payload, currentYear));
         updateLayers(); // 重绘以显示选中态
       } else if (pin.kind === 'clash' || pin.kind === 'battle') {
         if (panel) panel.showPlace(battleCard(pin.payload)); // 交战点 → 整场战争的背景卡
@@ -1205,7 +1223,7 @@ function updateLayers() {
     deckOverlay.setProps({ layers });
     return;
   }
-  // 第三模式：中国历史地图（汉/唐/明 + 三国/南北朝/五代十国）
+  // 第三模式：中国古代史（汉/唐/明 + 三国/南北朝/五代十国）
   if (mode === 'chinaHist') {
     // 公共底图（河流/山脉/湖泊）复用既有 builder，不动其实现
     if (layersState.river && rivers) {
@@ -1455,7 +1473,7 @@ async function loadChinaRegions() {
   }
 }
 
-// 当代省级地图底板（仅中国历史模式用作浅色无交互参考线）。
+// 当代省级地图底板（仅中国古代史模式用作浅色无交互参考线）。
 // 数据来源：阿里 DataV.GeoAtlas 标准行政区划（公共地理边界，非受版权保护的专题地图描绘），
 // 运行时按需拉取，不随仓库分发（与 historical-basemaps 同源策略一致）。
 // 非阻断：网络不可用或拉取失败时静默跳过，不影响其他图层。
@@ -1576,6 +1594,18 @@ function getYearEvents(y) {
   return { title: `🌍 ${fmtYear(y)} 年 · 世界大事`, items: getWorldEvents(y) };
 }
 
+// 复位视图：回到**当前这幅图**的本位视图（见 MODE_VIEW）。
+// 顺带把北向/俯仰角归零，避免拖拽旋转后复位仍带着歪斜的视角。
+function flyToModeView(m, duration = 800) {
+  if (!map) return;
+  const v = MODE_VIEW[m] || MODE_VIEW.world;
+  map.flyTo({ center: v.center, zoom: v.zoom, pitch: v.pitch, bearing: v.bearing, duration });
+}
+
+function resetView() {
+  flyToModeView(mode);
+}
+
 function setMode(m) {
   mode = m;
   stopWarAnim(); // 切换模式时停止战争动画循环（离开 chinaHist 后不再逐帧重绘）
@@ -1607,7 +1637,7 @@ function setMode(m) {
   }
   // 面板项随模式调整：「历代政区界」仅中国疆域模式有意义（世界模式隐藏该开关）
   if (panel && panel.setMode) panel.setMode(m);
-  // 套用该模式的图层默认，并同步面板勾选（首次进入中国历史模式会切换成其专属默认）
+  // 套用该模式的图层默认，并同步面板勾选（首次进入中国古代史模式会切换成其专属默认）
   const def = MODE_LAYER_DEFAULTS[m];
   if (def) {
     Object.keys(def).forEach((k) => { layersState[k] = def[k]; });
@@ -1615,7 +1645,7 @@ function setMode(m) {
     applyRelief();      // MapLibre 地形晕渲需随默认值重新生效
     applyBasemapLand(); // 今地图开关同理
   }
-  // 首次进入中国历史模式时懒加载当代省界参考底图（非阻断：失败静默跳过）
+  // 首次进入中国古代史模式时懒加载当代省界参考底图（非阻断：失败静默跳过）
   if (m === 'chinaHist' && !chinaProvincesLoaded) {
     chinaProvincesLoaded = true;
     loadChinaProvinces();
@@ -1628,18 +1658,18 @@ function setMode(m) {
   if (m === 'china') {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
-    map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
+    flyToModeView('china');
     // 中国模式：不自动弹出介绍卡（信息卡已随模式切换关闭），待用户点击某个政权/朝代再打开
   } else if (m === 'chinaHist') {
     // 默认落在西汉（统一王朝、疆域完整），而不是时间轴最左端的夏——
     // 夏/商疆域为考古分布示意，作为首屏观感偏弱。
     currentYear = -100;
     if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, currentYear);
-    map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
+    flyToModeView('chinaHist');
   } else {
     currentYear = 1960;
     if (timeline) timeline.setRange(YEAR_MIN, YEAR_MAX, currentYear);
-    map?.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 });
+    flyToModeView('world');
   }
   updateYearLabel();
   updateLayers();
@@ -1670,6 +1700,15 @@ async function init() {
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     pinLayer = createPinLayer(map);
+    // 只读调试句柄（自动化验收/排障用）：读当前模式与相机，不提供任何写操作。
+    window.__mtmView = () => ({
+      mode,
+      year: currentYear,
+      center: map.getCenter().toArray(),
+      zoom: map.getZoom(),
+      pitch: map.getPitch(),
+      bearing: map.getBearing(),
+    });
 
     // 关键修复：覆盖层立即挂载，不依赖底图是否加载成功
     let overlayAdded = false;
@@ -1771,7 +1810,7 @@ async function init() {
         updateLayers();
         if (panel && panel.rerender) panel.rerender(); // 刷新打开中的信息卡（简介+事件随语言/图层同步）
       },
-      onReset: () => map.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 }),
+      onReset: () => resetView(),
     });
     // 初始模式为世界地图：隐藏只对中国疆域生效的「历代政区界」开关
     if (panel && panel.setMode) panel.setMode(mode);
@@ -1779,7 +1818,7 @@ async function init() {
     warList = createWarList({ onSelect: (id) => jumpToWar(id) });
     const warBtn = document.getElementById('btn-war-list');
     if (warBtn) warBtn.textContent = `⚔ 战争列表（${WARS.length}）`;
-    // 世界/中国/中国历史 模式切换
+    // 世界/中国/中国古代史 模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));
     document.getElementById('mode-chinahist')?.addEventListener('click', () => setMode('chinaHist'));
