@@ -772,11 +772,19 @@ function buildChinaRegionLayer() {
     id: 'china-regions',
     data: { type: 'FeatureCollection', features: feats },
     stroked: true,
-    filled: false, // 只画界线，避免与疆域填充叠色
+    // 【拾取关键】必须 filled:true，哪怕填充几乎全透明。
+    // deck.gl 的拾取走渲染管线：filled:false 时多边形内部根本不进拾取缓冲，
+    // 只有 0.5~0.8px 宽的描边可命中 → 表现为"点政区内没反应，只有刚好点在
+    // 界线上才弹卡片"。用 alpha=1 的填充既能保持"只看见界线"的观感，又让整块
+    // 区域可点击（1/255 的着色肉眼不可辨）。
+    filled: true,
+    getFillColor: [110, 60, 35, 1],
     getLineColor: [110, 60, 35, 170],
     getLineWidth: 0.8,
     lineWidthMinPixels: 0.5,
     pickable: true,
+    autoHighlight: true,
+    highlightColor: [226, 36, 42, 70], // 悬停即泛红：明确告诉用户"这块可以点"
     onClick: (info) => {
       if (!info.object || !panel) return;
       chinaInfoOpen = true;
@@ -917,7 +925,30 @@ function updateYearLabel() {
 function addOverlayOnce() {
   if (deckOverlay || !map) return;
   try {
-    deckOverlay = new MapboxOverlay({ interleaved: false, layers: [] });
+    // 悬停提示：仅对「历代政区界」生效，鼠标移到某块政区上就显示"名称（类型）"，
+    // 让用户先知道这里可以点（此前无任何 hover 反馈，很容易误判为图层没生效）。
+    deckOverlay = new MapboxOverlay({
+      interleaved: false,
+      layers: [],
+      getTooltip: ({ object, layer }) => {
+        if (!object || layer?.id !== 'china-regions') return null;
+        const p = object.properties;
+        if (!p?.name) return null;
+        const fy = (y) => (y < 0 ? `前${-y}` : `${y}`);
+        return {
+          text: `${p.name}${p.type ? `（${p.type}）` : ''}\n${p.dynastyName || ''} ${fy(p.beg)}–${fy(p.end)}`,
+          style: {
+            background: 'rgba(28,24,20,0.92)',
+            color: '#f5efe6',
+            fontSize: '12px',
+            padding: '6px 9px',
+            borderRadius: '4px',
+            whiteSpace: 'pre-line',
+            pointerEvents: 'none',
+          },
+        };
+      },
+    });
     map.addControl(deckOverlay);
     updateLayers();
   } catch (e) {
