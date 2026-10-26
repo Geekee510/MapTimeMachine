@@ -71,7 +71,7 @@ export function flagOf(enName) {
   return FLAGS[base] || '';
 }
 
-export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onWarList }) {
+export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onWarList, onExitWar }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tOutline = document.getElementById('toggle-outline');
   const tRegion = document.getElementById('toggle-region');
@@ -88,11 +88,15 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
   const tProvince = document.getElementById('toggle-province');
   const tPass = document.getElementById('toggle-pass');
   const tCity = document.getElementById('toggle-city');
-  const tWar = document.getElementById('toggle-war');
   const resetBtn = document.getElementById('reset-view');
   const info = document.getElementById('info');
   const infoClose = document.getElementById('info-close');
   const infoEvents = document.getElementById('info-events');
+  const btnHelp = document.getElementById('btn-help');
+  const panelHelp = document.getElementById('panel-help');
+  const warPlaying = document.getElementById('war-playing');
+  const warPlayingName = document.getElementById('war-playing-name');
+  const warPlayingExit = document.getElementById('war-playing-exit');
 
   let lastProps = null; // 当前展示的对象（国家 or 山脉），用于年份/语言变化时刷新
 
@@ -110,7 +114,20 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
   tProvince?.addEventListener('change', () => onToggleLayer('provinceRef', tProvince.checked));
   tPass?.addEventListener('change', () => onToggleLayer('pass', tPass.checked));
   tCity?.addEventListener('change', () => onToggleLayer('city', tCity.checked));
-  tWar?.addEventListener('change', () => onToggleLayer('war', tWar.checked));
+  // 「!」圆圈：把原先面板底部的数据来源说明收进弹层（面板本身保持干净）
+  btnHelp?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!panelHelp) return;
+    panelHelp.classList.toggle('hidden');
+    btnHelp.classList.toggle('active', !panelHelp.classList.contains('hidden'));
+  });
+  document.addEventListener('click', (e) => {
+    if (!panelHelp || panelHelp.classList.contains('hidden')) return;
+    if (panelHelp.contains(e.target) || btnHelp?.contains(e.target)) return;
+    panelHelp.classList.add('hidden');
+    btnHelp?.classList.remove('active');
+  });
+  warPlayingExit?.addEventListener('click', () => { if (onExitWar) onExitWar(); });
   // 第三幅图：战争列表页入口（面板按钮，仅中国历史模式显示）
   document.getElementById('btn-war-list')?.addEventListener('click', () => {
     if (onWarList) onWarList();
@@ -310,12 +327,23 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
         territory: tTerritory, outline: tOutline, region: tRegion, river: tRiver,
         riverLabel: tRiverLabel, mountain: tMountain, relief: tRelief, lake: tLake,
         basemapLand: tBasemap, zh: tZh, polity: tPolity, provinceRef: tProvince,
-        pass: tPass, city: tCity, war: tWar,
+        pass: tPass, city: tCity,
       };
       for (const k in map) {
         const el = map[k];
         if (el && state[k] !== undefined) el.checked = !!state[k];
       }
+    },
+    // 战争回放状态条（传入 null 表示未在回放）
+    setWarPlaying(title) {
+      if (!warPlaying) return;
+      if (!title) {
+        warPlaying.classList.add('hidden');
+        if (warPlayingName) warPlayingName.textContent = '';
+        return;
+      }
+      if (warPlayingName) warPlayingName.textContent = title;
+      warPlaying.classList.remove('hidden');
     },
     showInfo(props) {
       lastProps = props;

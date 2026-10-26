@@ -22,7 +22,7 @@
 // 数据合规：仅使用公开的现代行政区划边界与 CC BY-SA 的 historical-basemaps 快照，
 // 不打包/描摹受版权保护的专题地图（谭图等）。产出为"示意级"疆域。
 
-import { simplifyGeometry, chaikin, dissolveRings } from '../../lib/geo.js';
+import { simplifyGeometry, douglasPeucker, chaikin, dissolveRings } from '../../lib/geo.js';
 import { polylabel, pointInRing, distToRing } from '../../lib/polylabel.js';
 import { resolveAdcodes, resolveRawGeometry } from '../../data/polities/index.js';
 
@@ -40,6 +40,8 @@ const _cache = new Map();
 
 export function clearTerritoryCache() {
   _cache.clear();
+  _patchCache.clear();
+  _nationalRing = null;
 }
 
 function findProvince(provinceFeatures, adcode) {
@@ -147,6 +149,98 @@ function buildOutline(features) {
     .map((ring) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] } }));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 具名补丁（超出今国境的疆土）：'mongolia' —— 外蒙古 / 唐安北都护府
+//
+// 关键点：**补丁的南边界直接取自中国国界轮廓的北段**（同样是简化后的省界顶点），
+// 因此补丁与内蒙古/甘肃/新疆的边界是"同一条边"（顶点完全一致），边计数 dissolve
+// 会把这条公共边成对消掉 —— 疆域内部不会出现接缝。
+// 早期版本用手绘大环（唐漠北 [[88,42],[100,41],[112,42],…]）去盖，一磨圆就变成
+// 一个横贯北方的巨大椭圆，还被单独描边画在疆域中间（用户反馈的"大圆圈"）。
+//
+// 南边界从西端(阿尔泰附近)沿国界到东端(满洲里附近)，再由一条北向弧线闭合。
+const MONGOLIA_WEST = [87.75, 49.15];  // 中蒙俄西端三国交界（阿尔泰）
+const MONGOLIA_EAST = [119.90, 46.65]; // 中蒙东端（阿尔山附近）
+// 北向弧线：东端 → 肯特山 → 色楞格 → 库苏古尔 → 唐努乌梁海 → 西端（示意）
+const MONGOLIA_NORTH_ARC = [
+  [120.20, 47.60], [119.20, 48.60], [117.60, 49.50], [116.00, 50.10],
+  [114.20, 50.30], [112.00, 50.05], [110.00, 49.60], [107.60, 49.90],
+  [104.60, 50.40], [101.60, 50.85], [98.60, 50.55], [95.80, 50.10],
+  [93.20, 50.60], [90.60, 50.25], [88.60, 49.75],
+];
+
+let _nationalRing = null;   // 中国国界轮廓（简化后，主环）
+let _patchCache = new Map();
+
+// 中国国界轮廓（全部省界并集的主环）。用**简化后**的省界算，保证与填充要素同源。
+function nationalRing(provinceFeatures) {
+  if (_nationalRing) return _nationalRing;
+  const rings = [];
+  for (const f of provinceFeatures) rings.push(...provinceOuterRings(f));
+  if (!rings.length) return null;
+  const simplified = rings.map((r) => douglasPeucker(r, SIMPLIFY_EPS));
+  const dissolved = dissolveRings(simplified, 5);
+  if (!dissolved.length) return null;
+  _nationalRing = dissolved.sort((a, b) => ringArea(b) - ringArea(a))[0];
+  return _nationalRing;
+}
+
+const nearestIndex = (ring, p) => {
+  let best = 0;
+  let bd = Infinity;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const d = Math.hypot(ring[i][0] - p[0], ring[i][1] - p[1]);
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+};
+
+// 从环上截取「西端 → 东端」的一串顶点（取两段路径里较短的一段，即沿国界而非绕全国）
+function borderChain(ring, west, east) {
+  const n = ring.length - 1; // 首尾重复，实际顶点数 n
+  const iw = nearestIndex(ring, west);
+  const ie = nearestIndex(ring, east);
+  const walk = (step) => {
+    const out = [];
+    let i = iw;
+    for (let guard = 0; guard <= n; guard++) {
+      out.push(ring[i]);
+      if (i === ie) break;
+      i = (i + step + n) % n;
+    }
+    return out;
+  };
+  const fwd = walk(1);
+  const bwd = walk(-1);
+  const len = (a) => {
+    let s = 0;
+    for (let i = 1; i < a.length; i++) s += Math.hypot(a[i][0] - a[i - 1][0], a[i][1] - a[i - 1][1]);
+    return s;
+  };
+  const chain = len(fwd) <= len(bwd) ? fwd : bwd;
+  // 统一成"西 → 东"方向（后面接北向弧线，方向必须一致才能闭合成环）
+  const dWest = Math.hypot(chain[0][0] - west[0], chain[0][1] - west[1]);
+  const dEast = Math.hypot(chain[0][0] - east[0], chain[0][1] - east[1]);
+  return dWest <= dEast ? chain : chain.slice().reverse();
+}
+
+function mongoliaPatch(provinceFeatures) {
+  if (_patchCache.has('mongolia')) return _patchCache.get('mongolia');
+  if (!provinceFeatures) return null;
+  const ring = nationalRing(provinceFeatures);
+  if (!ring) return null;
+  const chain = borderChain(ring, MONGOLIA_WEST, MONGOLIA_EAST);
+  if (chain.length < 2) return null;
+  // 补丁环 = 国界北段（与省界共享顶点）+ 北向弧线（东→西）+ 回到起点
+  const out = chain.slice();
+  for (const p of MONGOLIA_NORTH_ARC) out.push(p);
+  out.push([chain[0][0], chain[0][1]]);
+  _patchCache.set('mongolia', out);
+  return out;
+}
+
+const PATCH_RESOLVERS = { mongolia: mongoliaPatch };
+
 // 主入口。
 //   polity —— 统一政权对象（src/data/polities）
 //   seg    —— 该年份生效的时间切片
@@ -181,6 +275,13 @@ export function buildPolityGeometries(polity, seg, ctx = {}) {
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [chaikin(ring, 4)] },
     });
+  }
+
+  // 2b) 具名补丁（蒙古）：与省界共享边界的拼环，无需磨圆也无需再消缝
+  for (const key of seg?.patchKeys || []) {
+    const ring = PATCH_RESOLVERS[key]?.(provinceFeatures);
+    if (!ring || ring.length < 4) continue;
+    features.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] } });
   }
 
   // 3) 外部真实几何（夏/西周）

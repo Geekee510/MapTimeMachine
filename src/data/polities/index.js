@@ -28,7 +28,9 @@
 //                resolveAdcodes() 解析成 adcode。保留关键词而非 precomputed adcode，
 //                是为了维持"单一数据源、零漂移"。
 //   · patches    手绘环数组 [[[lng,lat],...], ...]，超出现代国境的疆土
-//                （唐漠北、元/清外蒙古），渲染时 Chaikin 磨圆。
+//                （渲染时 Chaikin 磨圆）
+//   · patchKeys  具名补丁（'mongolia'）：由 territoryGen 用国界轮廓现场拼出，
+//                与省界共享顶点，dissolve 后不产生内部接缝
 //   · rawKey     外部真实几何键（夏 'Xia' / 西周 'Zhoa'），取自 china_preqin.geojson。
 //   · 三者可叠加：provinces 为主体，patches/rawKey 作为补充。
 //
@@ -50,25 +52,13 @@ const PARALLEL_PALETTE = [
 ];
 
 // 外蒙古（今蒙古国）大致范围：china.js 里 '蒙古' 这一项不在 DataV 省界数据内，
-// 第二幅图用 CShapes 蒙古国几何补上；第三幅图不加载 CShapes，改用示意补丁
-// （Chaikin 磨圆后视觉上就是蒙古国轮廓）。
-const MONGOLIA_RING = [
-  [87.8, 49.0], [89.5, 47.8], [90.9, 45.2], [96.4, 42.7], [105.0, 41.8],
-  [111.9, 43.5], [116.7, 46.5], [119.9, 46.6], [117.4, 49.6], [113.0, 50.3],
-  [107.0, 49.8], [98.0, 50.6], [92.0, 50.8],
-];
-
-// 唐漠北（安北都护府）超出今国境，示意补丁
-const TANG_MOBEI_RING = [
-  [88, 42], [100, 41], [112, 42], [120, 46], [126, 50], [100, 52], [90, 50],
-];
-
-// 手工精修：源数据（china.js）无法表达的部分。
-// rings 只挂到 segIndexes 指定的切片上（唐只有早期实控漠北）。
-const EXTRA_PATCHES = {
-  'tang:唐': { segIndexes: [0], rings: [TANG_MOBEI_RING] },
-  yuan: { segIndexes: [0], rings: [MONGOLIA_RING] },
-  qing: { segIndexes: [0], rings: [MONGOLIA_RING] },
+// 第二幅图用 CShapes 蒙古国几何补上；第三幅图改用 patchKey:'mongolia' ——
+// 由 territoryGen 用**中国国界轮廓的北段**（与省界共享顶点）+ 一条北向弧线现场拼出，
+// 这样补丁与省界严丝合缝，dissolve 时公共边成对消掉，不会在疆域内部画出一个大圆圈。
+const EXTRA_PATCH_KEYS = {
+  'tang:唐': { segIndexes: [0], keys: ['mongolia'] },
+  yuan: { segIndexes: [0], keys: ['mongolia'] },
+  qing: { segIndexes: [0], keys: ['mongolia'] },
 };
 
 // 判断某个并立政权是否应算作"中央王朝"（决定配色与是否画进历史疆域底图）。
@@ -118,6 +108,7 @@ function buildPolities() {
           end: st.end ?? d.end,
           provinces: st.provinces || [],
           patches: Array.isArray(st.bounds) ? st.bounds : [],
+          patchKeys: [],
           rawKey: null,
           capital: st.capital,
           capitalCoord: st.capitalCoord,
@@ -151,6 +142,7 @@ function buildPolities() {
       end: d.end,
       provinces: d.provinces || [],
       patches: Array.isArray(d.bounds) ? d.bounds : [],
+      patchKeys: [],
       rawKey: d.hbName || null,
       capital: d.capital,
       capitalCoord: d.capitalCoord,
@@ -178,12 +170,12 @@ function buildPolities() {
 }
 
 function applyExtraPatches(p) {
-  const extra = EXTRA_PATCHES[p.id];
+  const extra = EXTRA_PATCH_KEYS[p.id];
   if (!extra) return;
   for (const i of extra.segIndexes) {
     const seg = p.segs[i];
     if (!seg) continue;
-    seg.patches = [...(seg.patches || []), ...extra.rings];
+    seg.patchKeys = [...(seg.patchKeys || []), ...extra.keys];
   }
 }
 
