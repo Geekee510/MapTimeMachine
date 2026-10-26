@@ -10,6 +10,8 @@
 //
 // 覆盖不到的朝代（秦、三国、两晋、南北朝、隋、五代、南宋、民国）无对应政权多边形，
 // 仍回落使用 china_dynasties.geojson 的省界拼接。
+// 另：中华人民共和国**有意不生成轮廓**——HB 的 1960 China 多边形缺西藏/台湾/海南，
+// 现代中国疆域一律以省界拼接层为准（原因详见下方 SPEC 内注释）。
 //
 // 用法：node scripts/gen-china-outline.mjs
 
@@ -39,7 +41,11 @@ const SPEC = [
   { file: 'world_1783', dynasty: 'qing', dynastyName: '清', polity: 'Qing Empire' },
   { file: 'world_1800', dynasty: 'qing', dynastyName: '清', polity: 'Qing Empire' },
   { file: 'world_1900', dynasty: 'qing', dynastyName: '清', polity: 'Manchu Empire' },
-  { file: 'world_1960', dynasty: 'prc', dynastyName: '中华人民共和国', polity: 'China' },
+  // 【已移除】中华人民共和国（world_1960 / China）：
+  // HB 的 1960「China」多边形把西藏、台湾、海南全部排除在外（实测拉萨、台北、海口
+  // 均落在轮廓之外，全中国仅 743 个点，精度极粗），作为国家疆域参考线是错误的。
+  // 中华人民共和国不适用「史实边界参考线」——其疆域以省界拼接层为准（含台湾、西藏、
+  // 海南及南海诸岛），构建时不生成轮廓，运行时该朝代的参考线自动为空。
 ];
 
 function roundCoords(c, p = 3) {

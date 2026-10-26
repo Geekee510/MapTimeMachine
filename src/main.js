@@ -729,8 +729,11 @@ function buildChinaTerritoryLayer() {
 // 【已改为只描边、不填充】此前它与省界拼接层"双层实心叠加"，看起来像凭空多出一个图层：
 //   · 北宋：HB 的 Song Empire 轮廓会整块盖在辽、西夏、大理的分色之上；
 //   · 中华人民共和国：该轮廓缺台湾、西藏等，实心覆盖反而掩盖了我们省界清单里的完整版图。
-// 现在只作为"史实边界参考线"（褐色虚感细线）叠在疆域之上，既不遮挡分色也不缺块。
+// 现在只作为"史实边界参考线"（红色细线）叠在疆域之上，既不遮挡分色也不缺块。
 // 每个朝代可能有多个年代的轮廓（如清有 1700/1783/1800），取年份最接近当前年份的那个。
+// 注意：**中华人民共和国没有轮廓数据**——HB 的 1960 China 多边形缺西藏/台湾/海南
+// （已在 gen-china-outline.mjs 中剔除），此函数对该朝代返回 null，不画参考线；
+// 现代中国疆域一律以省界拼接层为准（该层含台湾、西藏、海南及南海诸岛）。
 function buildChinaOutlineLayer() {
   const d = getDynastyAtYear(currentYear);
   if (!d || !chinaOutlines || !chinaOutlines.length) return null;
