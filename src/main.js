@@ -22,7 +22,7 @@ import {
 } from './modes/chinaHist/index.js';
 import {
   passPins,
-  warBattlePins,
+  warPins,
   buildCityLayers,
   buildWarLayers,
   passCard,
@@ -697,7 +697,12 @@ function computeLabelChars() {
   for (const v of HB_ZH_VALUES) add(v); // 1886 年前的历史政权译名（如"阿拔斯王朝"）
   // 第三幅图的关隘/城市/战争文本：不在字符集里会渲染成豆腐块（此前关隘名偶发缺字）
   for (const p of PASSES) add(p.name);
-  for (const c of CITIES) add(c.name);
+  // 城市名会随年份变（长安/大兴/西安），**所有别名都必须进字符集**，
+  // 否则某个朝代切换到没登记过的名字就会渲染成豆腐块。
+  for (const c of CITIES) {
+    add(c.name);
+    for (const [, nm] of c.n || []) add(nm);
+  }
   for (const w of WARS) {
     add(w.meta.title);
     for (const pt of w.parties || []) { add(pt.short); add(pt.name); }
@@ -1072,9 +1077,9 @@ function ensureWarAnim() {
       labelFontSettings,
       labelFontFamily: LABEL_FONT_FAMILY,
       focusWarId,
-      zoom: map ? map.getZoom() : 4,
     });
     deckOverlay.setProps({ layers: [...histStaticLayers, ...warLayers] });
+    syncPins(); // 人马图钉跟着进度走（DOM Marker，不占 deck 图层）
     warRaf = requestAnimationFrame(tick);
   };
   warRaf = requestAnimationFrame(tick);
@@ -1123,6 +1128,34 @@ function jumpToWar(warId) {
   }
   warList?.setActive(w.id);
   warList?.close();
+}
+
+// 图钉同步：关隘（静态）+ 战争人马/交战图标（随动画进度移动）。
+// 静态图层重建与动画逐帧都走这一个入口 —— 逐帧只动"人马"的位置与朝向，
+// deck 侧也只重建两条路线图层，代价很小。
+function syncPins() {
+  if (!pinLayer) return;
+  if (mode !== 'chinaHist') {
+    pinLayer.clear();
+    return;
+  }
+  const pins = [];
+  if (layersState.pass) pins.push(...passPins({ selectedId: selectedPassId }));
+  if (focusWarId) pins.push(...warPins(currentYear, warProgress ?? 0, { focusWarId }));
+  pinLayer.sync(pins, {
+    onClick: (pin) => {
+      if (pin.kind === 'pass') {
+        selectedPassId = pin.payload.id;
+        if (panel) panel.showPlace(passCard(pin.payload));
+        updateLayers(); // 重绘以显示选中态
+      } else if (pin.kind === 'clash' || pin.kind === 'battle') {
+        if (panel) panel.showPlace(battleCard(pin.payload)); // 交战点 → 整场战争的背景卡
+      } else if (pin.kind === 'rider') {
+        const w = warById(pin.payload?.warId);
+        if (w && panel) panel.showPlace(warCard(w));
+      }
+    },
+  });
 }
 
 function updateLayers() {
@@ -1212,40 +1245,23 @@ function updateLayers() {
       const pr = buildChinaProvinceRefLayer();
       if (pr) layers.push(pr);
     }
-    // 关隘 / 交战点：走图钉层（DOM Marker，见 ui/pinLayer.js），不参与 deck 图层
-    const pins = [];
-    if (layersState.pass) {
-      pins.push(...passPins({ selectedId: selectedPassId }));
-    }
-    if (focusWarId) {
-      pins.push(...warBattlePins(currentYear, focusWarId));
-    }
-    if (pinLayer) {
-      pinLayer.sync(pins, {
-        onClick: (pin) => {
-          if (pin.kind === 'pass') {
-            selectedPassId = pin.payload.id;
-            if (panel) panel.showPlace(passCard(pin.payload));
-            updateLayers(); // 重绘以显示选中态
-          } else if (pin.kind === 'battle') {
-            if (panel) panel.showPlace(battleCard(pin.payload)); // 交战点 → 整场战争的背景卡
-          }
-        },
-      });
-    }
-    // 城市 / 治所（独立图层，可点击看简介）
+    // 关隘 / 战争人马 / 交战点：走图钉层（DOM Marker，见 ui/pinLayer.js），不参与 deck 图层
+    syncPins();
+    // 城市 / 治所（独立图层，可点击看简介；城名随年份变化，按 rank+zoom 分级显示）
     if (layersState.city) {
       layers.push(
         ...buildCityLayers({
+          year: currentYear,
+          zoom: map ? map.getZoom() : 4,
           labelChars,
           labelFontSettings,
           labelFontFamily: LABEL_FONT_FAMILY,
-          onPick: (c) => { if (panel) panel.showPlace(cityCard(c)); },
+          onPick: (c) => { if (panel) panel.showPlace(cityCard(c, currentYear)); },
         })
       );
     }
     // 战争演进：只有在战争列表里选中某一场时才播放（focusWarId），
-    // 静态层先缓存，战争层（路线/箭头/队头）由动画循环逐帧追加
+    // 静态层先缓存，战争层（路线 + 军队名）由动画循环逐帧追加
     histStaticLayers = layers.slice();
     if (focusWarId) {
       if (warProgress == null) warProgress = 0;
@@ -1255,7 +1271,6 @@ function updateLayers() {
           labelFontSettings,
           labelFontFamily: LABEL_FONT_FAMILY,
           focusWarId,
-          zoom: map ? map.getZoom() : 4,
         })
       );
     } else {

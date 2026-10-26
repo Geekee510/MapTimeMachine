@@ -161,6 +161,20 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
 }
 #war-list .wl-foot { padding: 8px 16px 11px; font-size: 11px; color: #a49a8c; border-top: 1px solid #f0e6da; }
 
+/* 朝代筛选条（下拉框） */
+#war-list .wl-filter {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 16px; border-bottom: 1px solid #f2e7da; background: #fdf8f1;
+}
+#war-list .wl-filter label { font-size: 12px; font-weight: 700; color: #8a6a46; }
+#war-list #war-era-select {
+  flex: 1; min-width: 0; padding: 5px 8px; font: inherit; font-size: 13px;
+  color: #4a3a26;
+  background: #fff; border: 1px solid #ddc9b0; border-radius: 7px; cursor: pointer;
+}
+#war-list #war-era-select:focus { outline: none; border-color: #c8883a; box-shadow: 0 0 0 2px rgba(200,136,58,.18); }
+#war-list .wl-count { font-size: 11px; color: #a2907c; white-space: nowrap; }
+
 /* 时间轴 */
 #timeline {
   position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
@@ -220,17 +234,23 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
 #world-events .we-foot { margin-top: 10px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 6px; }
 #timeline #step-back, #timeline #step-fwd { min-width: 34px; padding: 6px 8px; border: none; border-radius: 8px; background: #6c8ebf; color: #fff; cursor: pointer; font-size: 12px; }
 
-/* ── 地图图钉（关隘城楼 / 交战双刀）：MapLibre DOM Marker ──────────────────
+/* ── 地图图钉（关隘城楼 / 骑马小人 / 交战）：MapLibre DOM Marker ──────────
    0×0 的锚点盒，子元素全部绝对定位到锚点中心；只有图标本身接收鼠标事件，
-   否则会挡住地图拖动。白晕用多层 drop-shadow 叠出来，压在深色疆域上也清楚。 */
+   否则会挡住地图拖动。白晕用多层 drop-shadow 叠出来，压在深色疆域上也清楚。
+   缩放用 CSS 变量 --s、朝向用 --rot，这样旋转与 hover 放大不会互相覆盖
+   （两处都写 transform 的话，后写的会把先写的整条替换掉）。 */
 .pin { width: 0; height: 0; overflow: visible; }
 .pin .pin-icon {
-  position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+  position: absolute; left: 0; top: 0;
+  /* --rot 存的是**方位角**（正北 0°、顺时针）；图标本体朝右（+x），
+     所以实际旋转要减 90°，否则北行会画成"朝东走"。 */
+  transform: translate(-50%, -50%) rotate(calc(var(--rot, 0deg) - 90deg)) scale(var(--s, 1));
   display: block; line-height: 0; pointer-events: auto; cursor: pointer;
   filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 2.5px #fff) drop-shadow(0 1px 2px rgba(0,0,0,.55));
   transition: transform .12s ease;
 }
-.pin .pin-icon:hover { transform: translate(-50%, -50%) scale(1.12); }
+.pin .pin-icon > svg { display: block; }
+.pin .pin-icon:hover { --s: 1.12; }
 .pin .pin-label {
   position: absolute; left: 0; top: 0; transform: translate(-50%, 15px);
   pointer-events: none; white-space: nowrap;
@@ -238,10 +258,40 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-sy
   color: #3c2410;
   text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 1px 1px rgba(0,0,0,.35);
 }
-.pin-battle .pin-label { color: #8f1a12; }
+.pin-battle .pin-label, .pin-clash .pin-label { color: #8f1a12; }
 .pin.is-selected .pin-icon {
-  transform: translate(-50%, -50%) scale(1.18);
+  --s: 1.18;
   filter: drop-shadow(0 0 3px #ffb030) drop-shadow(0 0 6px #ffcf6a) drop-shadow(0 1px 2px rgba(0,0,0,.5));
+}
+
+/* 骑马小人：图标本身朝右画，容器已按 --rot 转过，所以这里只做上下起伏
+   （跑动感），不再动 transform（会顶掉旋转）。 */
+@keyframes pin-gallop {
+  0%, 100% { transform: translateY(0) }
+  50% { transform: translateY(-1.6px) }
+}
+.pin-rider .pin-icon > svg { animation: pin-gallop .34s ease-in-out infinite; }
+.pin-rider.is-idle .pin-icon > svg { animation: none; } /* 守军原地驻守，不跑动 */
+
+/* 交战：图标弹出 + 红环外扩（两军相撞的冲击感）。
+   红环要钉在图标中心：.pin-icon 的左上角就是锚点，所以必须 left/top 用 50%。
+   （第一版写 left:0;top:0，环跑到图标左上角去了） */
+@keyframes pin-clash-pop {
+  0% { transform: scale(.55); opacity: 0 }
+  55% { transform: scale(1.16); opacity: 1 }
+  100% { transform: scale(1); opacity: 1 }
+}
+@keyframes pin-clash-ring {
+  0% { transform: translate(-50%, -50%) scale(.45); opacity: .9 }
+  70% { opacity: .35 }
+  100% { transform: translate(-50%, -50%) scale(1.75); opacity: 0 }
+}
+.pin-clash .pin-icon > svg { animation: pin-clash-pop .42s cubic-bezier(.2,1.5,.5,1) both; }
+.pin-clash .pin-burst {
+  position: absolute; left: 50%; top: 50%; width: 30px; height: 30px;
+  border-radius: 50%; border: 3px solid rgba(214, 66, 32, .85);
+  box-sizing: border-box; pointer-events: none;
+  animation: pin-clash-ring 1.1s ease-out infinite;
 }
 
 .maplibregl-ctrl-attrib { font-size: 10px; }

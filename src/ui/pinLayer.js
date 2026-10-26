@@ -1,12 +1,16 @@
 // 地图图钉层（MapLibre DOM Marker 池）
 // ---------------------------------------------------------------------------
-// 关隘 / 交战点这类"固定像素大小 + 可点击 + 带文字"的标记，用 MapLibre Marker 比
-// deck.gl IconLayer 更稳（见 lib/icons.js 的说明）。
-// 本模块只做一件事：把 [{id, kind, coord, label, selected}] 同步到地图上的 DOM 标记，
-// 复用已存在的标记（只改位置/类名/文案），多余的下线。
+// 关隘 / 交战点 / 行军中的人马这类"固定像素大小 + 可点击 + 带文字"的标记，用
+// MapLibre Marker 比 deck.gl IconLayer 更稳（见 lib/icons.js 的说明）。
+// 本模块只做一件事：把 [{id, kind, coord, label, selected, rot, color, idle}]
+// 同步到地图上的 DOM 标记，复用已存在的标记（只改位置/类名/文案），多余的下线。
 //
-// 性能：main.js 在战争动画期间会逐帧调用 sync()，所以这里先算一个"签名"，
-// 内容没变就直接返回，避免每帧都动 DOM。
+// 支持逐帧更新（战争动画里骑马的图钉每帧都在动）：
+//   coord  经纬度      → marker.setLngLat（MapLibre 内部走 transform，很轻）
+//   rot    朝向角度     → CSS 变量 --rot（正北 0°、顺时针）
+//   color  阵营色       → CSS 变量 --pin-color（骑手斗篷用）
+//   idle   原地驻守     → 加 is-idle 类，关掉跑动动画
+// 为避免每帧重建 DOM，先算一个"签名"，内容没变就整体返回。
 
 import maplibregl from 'maplibre-gl';
 import { pinHtml } from '../lib/icons.js';
@@ -19,7 +23,12 @@ export function createPinLayer(map) {
     const list = items || [];
     const onClick = opts.onClick;
     const global = list
-      .map((d) => `${d.id}:${d.kind}:${d.selected ? 1 : 0}:${d.label || ''}:${d.coord[0].toFixed(4)},${d.coord[1].toFixed(4)}`)
+      .map(
+        (d) =>
+          `${d.id}:${d.kind}:${d.selected ? 1 : 0}:${d.label || ''}:` +
+          `${d.coord[0].toFixed(4)},${d.coord[1].toFixed(4)}:` +
+          `${d.rot == null ? '' : Math.round(d.rot)}:${d.color || ''}:${d.idle ? 1 : 0}`
+      )
       .join('|');
     if (global === lastGlobal) return;
     lastGlobal = global;
@@ -28,7 +37,7 @@ export function createPinLayer(map) {
     for (const d of list) {
       if (!d.coord) continue;
       seen.add(d.id);
-      const sig = `${d.kind}:${d.selected ? 1 : 0}:${d.label || ''}`;
+      const sig = `${d.kind}:${d.selected ? 1 : 0}:${d.label || ''}:${d.idle ? 1 : 0}`;
       let rec = pins.get(d.id);
       if (!rec) {
         const el = document.createElement('div');
@@ -42,10 +51,13 @@ export function createPinLayer(map) {
         rec.marker.setLngLat(d.coord);
       }
       if (rec.sig !== sig) {
-        rec.el.className = `pin pin-${d.kind}${d.selected ? ' is-selected' : ''}`;
+        rec.el.className = `pin pin-${d.kind}${d.selected ? ' is-selected' : ''}${d.idle ? ' is-idle' : ''}`;
         rec.el.innerHTML = pinHtml(d.kind, d.label);
         rec.sig = sig;
       }
+      // 朝向 / 阵营色每帧都可能变，走 CSS 变量（不触碰 DOM 结构）
+      if (d.rot != null) rec.el.style.setProperty('--rot', `${d.rot.toFixed(1)}deg`);
+      if (d.color) rec.el.style.setProperty('--pin-color', d.color);
       rec.el.onclick = (e) => {
         e.stopPropagation();
         if (onClick) onClick(d);

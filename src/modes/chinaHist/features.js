@@ -8,11 +8,13 @@
 //   （战争动画每帧新建图层）场景下加载会失败；失败后 deck 退回自动打包模式，而
 //   getIcon 返回的是图集键名而非图片地址 → 图标静默不显示（实测关隘只剩个别出现）。
 //
-//   行军方向 = PathLayer 走线 + 末端一个**地理坐标三角箭头**（按 zoom 换算像素大小），
-//   方向由 bearing 直接算出，不再依赖图标旋转。
-import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+//   行军方向 = PathLayer 走线 + 队头一个**骑马小人图钉**（同样走 MapLibre Marker，
+//   按 bearing 旋转、跑动时有起伏动画）。两军接触后小人消失，原地换成"交战"图标。
+//   旧版用 PolygonLayer 画三角箭头，被骑马的图钉取代（箭头方向再准也不如一个会转身
+//   的小人直观）。
+import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { PASSES, passById } from './passes.js';
-import { CITIES, cityById } from './cities.js';
+import { citiesAtYear, cityNameAt, cityAliasText, cityById } from './cities.js';
 import { WARS, activeWars, warById } from './wars.js';
 
 function hexToRgb(hex) {
@@ -38,8 +40,12 @@ function bearingOf(a, b) {
 // 取路线从起点到「已行进比例 frac」的一段（按累计距离插值）。
 // 返回 {coordinates, head, headAngle}，headAngle 为队头行进方向（正北 0°，顺时针）。
 function traveledPath(route, frac) {
-  if (!route || route.length < 2 || frac <= 0) {
+  if (!route || route.length < 2) {
     return { coordinates: [], head: route ? route[0] : null, headAngle: 0 };
+  }
+  if (frac <= 0) {
+    // 还没起步：停在起点，但朝向要指向第一段的方向（否则小人一直朝北，起步瞬间会"甩头"）
+    return { coordinates: [], head: route[0], headAngle: bearingOf(route[0], route[1]) };
   }
   const n = route.length;
   if (frac >= 1) {
@@ -71,26 +77,13 @@ function traveledPath(route, frac) {
   return { coordinates: out, head: route[n - 1], headAngle: bearingOf(route[n - 2], route[n - 1]) };
 }
 
-// 末端箭头三角（地理坐标，但尺寸按当前 zoom 折算成固定像素）
-// 屏幕像素 → 经纬度：经度 360/(256·2^z)；纬度再乘 cos(lat)（墨卡托的纵向拉伸）。
-function arrowTriangle(head, bearingDeg, zoom, lenPx = 14, widePx = 5.5) {
-  const z = Number.isFinite(zoom) ? zoom : 4;
-  const lat = (head[1] * Math.PI) / 180;
-  const cos = Math.max(0.25, Math.cos(lat));
-  const degPerPx = 360 / (256 * Math.pow(2, z));
-  const ax = degPerPx / cos; // 每像素对应经度
-  const ay = degPerPx * cos; // 每像素对应纬度
-  const th = (bearingDeg * Math.PI) / 180;
-  const ux = Math.sin(th);
-  const uy = Math.cos(th);
-  const base = [head[0] - ux * lenPx * ax, head[1] - uy * lenPx * ay];
-  const nx = -Math.cos(th);
-  const ny = Math.sin(th);
-  return [
-    head,
-    [base[0] + nx * widePx * ax, base[1] + ny * widePx * ay],
-    [base[0] - nx * widePx * ax, base[1] - ny * widePx * ay],
-  ];
+// 路线总长（度，只用于"是否原地驻守"的判据，不需要精确）
+function routeLength(route) {
+  let len = 0;
+  for (let i = 1; i < (route || []).length; i++) {
+    len += Math.hypot(route[i][0] - route[i - 1][0], route[i][1] - route[i - 1][1]);
+  }
+  return len;
 }
 
 const labelOpts = (o) => ({
@@ -113,20 +106,34 @@ export function passPins(o = {}) {
 }
 
 // —— 城市图层（圆点 + 名称）——
+// 三重筛选，避免 68 个点在全国视野下糊成一片：
+//   ① 年份：早于建城年的不显示（战国才立的城不该出现在西周地图上）
+//   ② rank：1 永远显示，2 在 zoom≥3.5（中国全图就是 3.6），3 在 zoom≥4.8
+//   ③ 名称：按当前年份取别名（长安 → 大兴 → 西安）
+const RANK_MIN_ZOOM = { 1: 0, 2: 3.5, 3: 4.8 };
+
+export function visibleCities(year, zoom) {
+  const z = Number.isFinite(zoom) ? zoom : 4;
+  return citiesAtYear(year)
+    .filter((c) => z >= (RANK_MIN_ZOOM[c.rank || 2] ?? 0))
+    .map((c) => ({ ...c, label: cityNameAt(c, year) }));
+}
+
 export function buildCityLayers(o = {}) {
+  const data = visibleCities(o.year, o.zoom);
   const layers = [];
   layers.push(
     new ScatterplotLayer({
       id: 'chinahist-city',
-      data: CITIES,
+      data,
       getPosition: (d) => d.coord,
       radiusUnits: 'pixels',
-      getRadius: 7,
-      radiusMinPixels: 5,
-      getFillColor: [196, 120, 40, 240],
+      getRadius: (d) => (d.rank === 1 ? 7 : d.rank === 2 ? 6 : 5),
+      radiusMinPixels: 3,
+      getFillColor: (d) => (d.rank === 1 ? [196, 120, 40, 245] : [178, 122, 58, 210]),
       stroked: true,
       getLineColor: [255, 245, 225, 245],
-      lineWidthMinPixels: 1.6,
+      lineWidthMinPixels: 1.4,
       pickable: true,
       autoHighlight: true,
       highlightColor: [255, 220, 120, 150],
@@ -136,12 +143,14 @@ export function buildCityLayers(o = {}) {
   layers.push(
     new TextLayer({
       id: 'chinahist-city-label',
-      data: CITIES,
+      data,
       getPosition: (d) => d.coord,
-      getText: (d) => d.name,
-      getSize: 16,
-      getColor: [126, 66, 12, 255],
-      getPixelOffset: [0, 15],
+      getText: (d) => d.label,
+      getSize: (d) => (d.rank === 1 ? 17 : d.rank === 2 ? 14.5 : 12.5),
+      getColor: (d) => (d.rank === 1 ? [126, 66, 12, 255] : [138, 96, 48, 245]),
+      // 标签错行：一级城名放点的下方，二/三级放上方并缩小。江南、中原一带城市密集
+      // （杭州与绍兴只差 0.4°），全部压在点下方会叠成一坨；上下错开能救回来不少。
+      getPixelOffset: (d) => (d.rank === 1 ? [0, 15] : d.rank === 2 ? [0, -13] : [0, -11]),
       stroke: true,
       getStrokeColor: [255, 250, 240, 225],
       strokeWidth: 3,
@@ -152,19 +161,53 @@ export function buildCityLayers(o = {}) {
   return layers;
 }
 
-// 交战点图钉（只在回放某一场战争时出现）
-export function warBattlePins(year, focusId) {
-  if (!focusId) return [];
+// —— 战争图钉：行军中的人马 / 接触后的交战图标 ——
+// 一支部队一个"骑马小人"，位置 = 队头、朝向 = 行进方位角；
+// 两支（或以上）部队都抵达战场后，小人全部撤下，原地换成一个"交战"图标。
+// 点击小人或交战图标都能弹出整场战争的背景卡。
+const clamp01 = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+
+export function warPins(year, progress, o = {}) {
+  if (!o.focusWarId) return [];
+  const ws = activeWars(year, o.focusWarId);
+  if (!ws.length) return [];
+  const p = clamp01(progress);
   const out = [];
-  for (const w of activeWars(year, focusId)) {
-    for (const b of w.battles || []) {
+  for (const w of ws) {
+    const loc = w.battles?.[0]?.loc || (w.forces?.[0]?.route || []).slice(-1)[0];
+    if (!loc) continue;
+    // 接触时刻 = 所有"会移动"的部队都到位时的最大进度（原地驻守的不参与，
+    // 否则守军的 p1 会把它自己也算成一个"未到位"的部队）
+    const movers = (w.forces || []).filter((f) => routeLength(f.route) >= 1e-6);
+    const meetAt = movers.length ? Math.max(...movers.map((f) => (f.p1 ?? 1))) : 0.7;
+    if (p >= meetAt - 1e-6) {
       out.push({
-        id: `battle-${w.id}-${b.name}`,
-        kind: 'battle',
-        coord: b.loc,
-        label: b.name,
+        id: `clash-${w.id}`,
+        kind: 'clash',
+        coord: loc,
+        label: w.meta.title,
         selected: false,
-        payload: { ...b, warId: w.id },
+        payload: { ...(w.battles?.[0] || {}), warId: w.id },
+      });
+      continue;
+    }
+    for (const f of w.forces || []) {
+      const party = w.parties.find((x) => x.id === f.party) || {};
+      const p0 = f.p0 ?? 0;
+      const p1 = f.p1 ?? 1;
+      const frac = p1 > p0 ? clamp01((p - p0) / (p1 - p0)) : 1;
+      const { head, headAngle } = traveledPath(f.route, frac);
+      if (!head) continue;
+      out.push({
+        id: `rider-${w.id}-${f.party}`,
+        kind: 'rider',
+        coord: head,
+        rot: headAngle,
+        color: party.color,
+        idle: routeLength(f.route) < 1e-6, // 守军原地不动 → 关掉跑动动画
+        label: '',
+        selected: false,
+        payload: { warId: w.id },
       });
     }
   }
@@ -172,7 +215,8 @@ export function warBattlePins(year, focusId) {
 }
 
 // —— 战争动画图层（军队演进）——
-// 淡色完整路线 + 已行进粗线 + 末端箭头 + 队头点 + 军队名（交战点由图钉层画）
+// 淡色完整路线 + 已行进粗线 + 军队名。
+// 队头不再是三角箭头/圆点，而是由 warPins() 给出的**骑马小人图钉**（DOM Marker）。
 // progress = 0..1 的**动画进度**（不再是年份）。按进度驱动的好处：无论一场战争
 // 在史料上只占 1 个月还是 3 年，回放时长都恒定，且不会因"年份跨度 < 最小跨度"
 // 让军队卡在半路（旧版就是因此停在中途）。
@@ -187,31 +231,20 @@ export function buildWarLayers(year, progress, o = {}) {
       const p0 = f.p0 ?? 0;
       const p1 = f.p1 ?? 1;
       const frac = p1 > p0 ? Math.max(0, Math.min(1, (p - p0) / (p1 - p0))) : 1;
-      const { coordinates: traveled, head, headAngle } = traveledPath(f.route, frac);
-      const color = hexToRgb(party.color);
+      const { coordinates: traveled, head } = traveledPath(f.route, frac);
       // 出发点与战场重合（例：张巡守睢阳，守军本就在城里）→ 视为**驻守不动**：
-      // 不画路线、不画箭头，只留队头点与军队名。否则三个重合点会生成零长路线，
-      // 方位角退化成"正北"，在地图上留下一个莫名其妙的三角形。
-      let len = 0;
-      for (let i = 1; i < f.route.length; i++) {
-        len += Math.hypot(f.route[i][0] - f.route[i - 1][0], f.route[i][1] - f.route[i - 1][1]);
-      }
+      // 不画路线，只留军队名。
       routes.push({
         id: `${w.id}-${f.party}`,
-        color,
+        color: hexToRgb(party.color),
         full: f.route,
         traveled,
         head,
-        headAngle,
-        static: len < 1e-6,
+        static: routeLength(f.route) < 1e-6,
         label: party.short || party.name,
       });
     }
   }
-
-  const heads = routes
-    .filter((r) => r.head && !r.static && r.traveled.length > 1)
-    .map((r) => ({ poly: arrowTriangle(r.head, r.headAngle, o.zoom), color: r.color }));
 
   const layers = [
     // 完整行军路线（淡色，示意整体走向）
@@ -237,32 +270,6 @@ export function buildWarLayers(year, progress, o = {}) {
       widthMaxPixels: 12,
       capRounded: true,
       jointRounded: true,
-      pickable: false,
-    }),
-    // 末端箭头（三角，尺寸按 zoom 折算 → 屏幕上恒为 ~22px）
-    new PolygonLayer({
-      id: 'chinahist-war-arrowhead',
-      data: heads,
-      getPolygon: (d) => d.poly,
-      getFillColor: (d) => [d.color[0], d.color[1], d.color[2], 250],
-      stroked: true,
-      getLineColor: (d) => [Math.round(d.color[0] * 0.55), Math.round(d.color[1] * 0.55), Math.round(d.color[2] * 0.55), 200],
-      getLineWidth: 1,
-      lineWidthMinPixels: 0.8,
-      pickable: false,
-    }),
-    // 行军队头
-    new ScatterplotLayer({
-      id: 'chinahist-war-head',
-      data: routes.filter((r) => r.head),
-      getPosition: (d) => d.head,
-      radiusUnits: 'pixels',
-      getRadius: 5,
-      radiusMinPixels: 4,
-      getFillColor: (d) => [d.color[0], d.color[1], d.color[2], 250],
-      stroked: true,
-      getLineColor: [255, 255, 255, 245],
-      lineWidthMinPixels: 1.4,
       pickable: false,
     }),
   ];
@@ -305,23 +312,29 @@ export function passCard(p) {
   };
 }
 
-export function cityCard(c) {
+// 城市卡：标题用当前年份的城名（长安/大兴/西安随年份变），并列出全部曾用名
+export function cityCard(c, year) {
   if (!c) return null;
+  const now = cityNameAt(c, year);
+  const lines = [];
+  if (now !== c.name) lines.push(['今名', c.name]);
+  lines.push(['始建', c.founded], ['鼎盛', c.peak], ['曾用名', cityAliasText(c)]);
+  lines.push(['位置', `${c.coord[0].toFixed(2)}, ${c.coord[1].toFixed(2)}`]);
   return {
-    name: c.name,
+    name: now,
     kind: '城市',
     desc: c.desc,
-    lines: [
-      ['始建', c.founded],
-      ['鼎盛', c.peak],
-      ['位置', `${c.coord[0].toFixed(2)}, ${c.coord[1].toFixed(2)}`],
-    ],
+    lines,
   };
 }
 
 // 年（可带小数，表月/季）
+// 年份显示：史料里"同年内的一两个月"会被写成 -1046.05 这样的数（用于排序与时间轴），
+// 显示时不应变成"前1046.1"。零头小于 0.15 年就按整数年显示，其余保留一位小数。
 const fy = (y) => {
-  const n = Math.round(Math.abs(y) * 10) / 10;
+  const a = Math.abs(y);
+  const frac = a % 1;
+  const n = frac < 0.15 || frac > 0.85 ? Math.round(a) : Math.round(a * 10) / 10;
   return y < 0 ? `前${n}` : `${n}`;
 };
 

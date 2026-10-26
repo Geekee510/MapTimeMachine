@@ -53,14 +53,88 @@ const SWORDS = `
   </g>
 </svg>`;
 
-const ICONS = { pass: TOWER, battle: SWORDS };
+// 骑马小人：**朝右**画（SVG 的 +x 方向），实际朝向由 CSS 的 --rot 旋转
+// （正北 0°，顺时针）后再减 90°，所以地图上会顺着行军方向转身。
+//
+// 画法要点（第一版踩过的坑）：
+//   ① 腿不能太长太细 —— 38px 下会变成"蜘蛛"；这里腿短而粗，且明确朝下
+//   ② 马身 + 颈 + 头连成一笔轮廓，避免零碎小件在小尺寸下糊成一片
+//   ③ 马身棕色、骑手斗篷取阵营色（--pin-color），人和马要能一眼分开
+const HORSE = '#a0662f';
+const LINE = '#2a1a0b';
+
+// 骑马小人：**朝右**画（+x 方向），朝向由 CSS 的 --rot 旋转控制
+// （正北 0°、顺时针，渲染时再减 90°，让图标正面朝行进方向）。
+//
+// 画法（前两版踩过的坑都记在这）：
+//   ① 第一版腿细长 → 小尺寸下像蜘蛛；现在腿短粗、明确朝下
+//   ② 第二版颈+头用曲线一笔连 → 38px 糊成黑疙瘩；第三版拆成"斜带+方块"又显得零碎。
+//      最终把马身、颈、头合成**一整笔剪影**，只留耳朵/眼睛/尾巴做点缀
+//   ③ 马身棕、骑手斗篷取阵营色（--pin-color），人、马必须一眼分开
+const RIDER = `
+<svg viewBox="0 0 40 40" width="38" height="38" aria-hidden="true">
+  <!-- 四条腿：短粗、朝下（细长腿在 38px 下会读成"蜘蛛"） -->
+  <g stroke="${LINE}" stroke-width="2.4" stroke-linecap="round">
+    <path d="M10.8 23.6 L9.2 29.8"/>
+    <path d="M15.2 23.8 L14.6 30.2"/>
+    <path d="M22.4 23.8 L23.2 30.2"/>
+    <path d="M26.4 23.6 L28.4 29.8"/>
+  </g>
+  <g stroke="${LINE}" stroke-width="1.5" stroke-linejoin="round" fill="${HORSE}">
+    <!-- 马：一整笔剪影（身 + 颈 + 头），剪影比"拼接几块几何体"更耐看 -->
+    <path d="M37.5 7.4 L37.9 11.5 L33.0 13.2 L29.2 18.6 L28.6 24.0 L14.0 24.0 L8.0 23.5
+             L7.5 18.4 L14.0 17.0 L22.0 16.6 L26.6 16.2 L30.6 9.6 L34.3 7.6 Z"/>
+    <!-- 尾巴 -->
+    <path d="M7.8 18.0 L3.8 21.4 L7.4 22.2 Z"/>
+  </g>
+  <!-- 耳朵 / 眼睛 -->
+  <path d="M32.8 8.2 L33.2 4.4 L35.4 6.8 Z" fill="#7d4b23" stroke="${LINE}" stroke-width="1"/>
+  <circle cx="35.8" cy="9.6" r="0.9" fill="${LINE}"/>
+  <!-- 骑手：身体用阵营色整块（--pin-color），头、手臂、腿用深描边 -->
+  <g stroke="${LINE}" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M17.6 17.2 L18.6 10.6 L21.8 10.6 L22.6 17.2 Z" fill="var(--pin-color, #b2543a)"/>
+    <circle cx="20.2" cy="8.0" r="2.9" fill="#f6e0bb"/>
+    <path d="M20.8 12.0 L25.4 13.8" fill="none" stroke-width="1.9"/>
+    <path d="M20.4 17.4 L23.0 20.6" fill="none" stroke-width="1.7"/>
+  </g>
+</svg>`;
+
+// 交战：双刀交叉 + 冲击星芒 + 外扩红环（"两军接触"的爆点）。
+// 星芒只画一圈短刺（不伸到图标边缘），否则 42px 下会读成"罗盘/靶心"，
+// 反而盖住双刀。红环由 CSS 的 .pin-burst 无限外扩（见 style.css）。
+const SPIKE = '<path d="M20 5.2 L22.3 10.8 L17.7 10.8 Z"/>';
+const CLASH = `
+<svg viewBox="0 0 40 40" width="42" height="42" aria-hidden="true">
+  <g fill="#ffd24a" stroke="#a1590a" stroke-width="0.7" opacity="0.92">
+    ${[0, 45, 90, 135, 180, 225, 270, 315].map((a) => `<g transform="rotate(${a} 20 20)">${SPIKE}</g>`).join('')}
+  </g>
+  <circle cx="20" cy="20" r="9.2" fill="#fff3d0" opacity="0.92"/>
+  <g stroke-linejoin="round" stroke-linecap="round">
+    <g transform="rotate(-45 20 20)" opacity="0.92">
+      <path d="M20 4.6 L22.6 9.4 V19 H17.4 V9.4 Z" fill="#cfe0f2" stroke="#1b2836" stroke-width="1.3"/>
+      <path d="M13 19.4 H27 L25.8 22 H14.2 Z" fill="#d99a13" stroke="#5a3905" stroke-width="1.1"/>
+      <path d="M18.2 22 H21.8 V28.4 H18.2 Z" fill="#a02a13" stroke="#3d0d05" stroke-width="1"/>
+      <circle cx="20" cy="30" r="2.4" fill="#d99a13" stroke="#5a3905" stroke-width="1.1"/>
+    </g>
+    <g transform="rotate(45 20 20)">
+      <path d="M20 4.6 L22.6 9.4 V19 H17.4 V9.4 Z" fill="#f4f9ff" stroke="#1b2836" stroke-width="1.3"/>
+      <path d="M13 19.4 H27 L25.8 22 H14.2 Z" fill="#ffc22e" stroke="#6b4406" stroke-width="1.1"/>
+      <path d="M18.2 22 H21.8 V28.4 H18.2 Z" fill="#c8371c" stroke="#4a1006" stroke-width="1"/>
+      <circle cx="20" cy="30" r="2.4" fill="#ffc22e" stroke="#6b4406" stroke-width="1.1"/>
+    </g>
+  </g>
+</svg>`;
+
+const ICONS = { pass: TOWER, battle: CLASH, clash: CLASH, rider: RIDER };
 
 export function pinIcon(kind) {
   return ICONS[kind] || TOWER;
 }
 
 // 图钉 DOM：0×0 的锚点盒 + 居中图标 + 下方文字标签（白晕保证压在深色疆域上也清楚）
+// clash 额外带一个外扩红环（.pin-burst），用来表现"两军相撞"的瞬间。
 export function pinHtml(kind, label) {
+  const burst = kind === 'clash' ? '<span class="pin-burst"></span>' : '';
   const text = label ? `<span class="pin-label">${label}</span>` : '';
-  return `<span class="pin-icon">${pinIcon(kind)}</span>${text}`;
+  return `<span class="pin-icon">${burst}${pinIcon(kind)}</span>${text}`;
 }
