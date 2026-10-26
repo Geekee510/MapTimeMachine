@@ -74,9 +74,9 @@ export function flagOf(enName) {
 export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tOutline = document.getElementById('toggle-outline');
-  const rowOutline = document.getElementById('row-outline'); // 「史实边界参考线」整行（仅中国模式可见）
   const tRegion = document.getElementById('toggle-region');
-  const rowRegion = document.getElementById('row-region'); // 「历代政区界」整行（仅中国模式可见）
+  // 分隔线 + 中国疆域专属图层整块（世界模式下整体隐藏，含分隔线本身）
+  const groupChina = document.getElementById('group-china');
   const tRiver = document.getElementById('toggle-river');
   const tRiverLabel = document.getElementById('toggle-river-label');
   const tMountain = document.getElementById('toggle-mountain');
@@ -282,13 +282,11 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   }
 
   return {
-    // 视图模式切换时调整面板可用项：
-    // 「史实边界参考线」与「历代政区界」的数据只覆盖中国，世界模式下这两个图层
-    // 不参与渲染，故把整行开关隐藏，避免用户在世界模式里勾选后毫无反应。
+    // 面板按视图模式分组：分隔线以上为公共图层（两种模式都有效）；
+    // 分隔线以下（史实边界参考线 / 历代政区界）数据只覆盖中国，世界模式整体隐藏，
+    // 连分隔线一起收起，避免面板出现一条空线。
     setMode(m) {
-      const chinaOnly = m === 'china' ? '' : 'none';
-      if (rowOutline) rowOutline.style.display = chinaOnly;
-      if (rowRegion) rowRegion.style.display = chinaOnly;
+      if (groupChina) groupChina.style.display = m === 'china' ? '' : 'none';
     },
     showInfo(props) {
       lastProps = props;

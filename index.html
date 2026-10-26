@@ -41,9 +41,8 @@
     <!-- 右侧图层面板 -->
     <div id="panel">
       <div class="panel-title">图层</div>
+      <!-- 公共图层：世界地图 / 中国疆域 两种模式都生效 -->
       <label><input type="checkbox" id="toggle-territory" checked /> 历史疆域</label>
-      <label id="row-outline"><input type="checkbox" id="toggle-outline" checked /> 史实边界参考线</label>
-      <label id="row-region"><input type="checkbox" id="toggle-region" checked /> 历代政区界（州/府）</label>
       <label><input type="checkbox" id="toggle-river" checked /> 主要河流</label>
       <label><input type="checkbox" id="toggle-river-label" checked /> 河流名称</label>
       <label><input type="checkbox" id="toggle-mountain" checked /> 山脉名称</label>
@@ -51,6 +50,12 @@
       <label><input type="checkbox" id="toggle-lake" /> 湖泊</label>
       <label><input type="checkbox" id="toggle-basemap" /> 今地图（含小岛）</label>
       <label><input type="checkbox" id="toggle-zh" checked /> 中文标签</label>
+      <!-- 分隔线以下：仅「中国疆域」模式可用的专属图层（世界模式下整块隐藏） -->
+      <div id="group-china">
+        <div class="panel-divider"></div>
+        <label id="row-outline"><input type="checkbox" id="toggle-outline" checked /> 史实边界参考线</label>
+        <label id="row-region"><input type="checkbox" id="toggle-region" checked /> 历代政区界（州/府）</label>
+      </div>
       <button id="reset-view">复位视图</button>
       <div class="panel-note">底图：MapLibre demotiles（含陆地/水域/国界）<br/>疆域：CShapes 2.1（CC BY-NC-SA）<br/>河流/山脉/湖泊：Natural Earth（公共领域，需先运行 <code>npm run fetch-data</code>）</div>
     </div>

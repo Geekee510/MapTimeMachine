@@ -744,12 +744,12 @@ function buildChinaOutlineLayer() {
     data: { type: 'FeatureCollection', features: [best] },
     stroked: true,
     filled: false, // 关键：不再用第二个实心多边形覆盖疆域层
-    // 配色：此前用深褐 [90,30,18]，与疆域填充的砖红 [178,84,58] 几乎同族，
-    // 用户难以分辨"哪条线是参考线"。改为深靛紫 —— 与填充（砖红）、河流（蓝）、
-    // 政区界（褐）三个已有色系都不冲突，一眼能看出是"叠加的参考图层"。
-    getLineColor: [96, 58, 142, 240],
-    getLineWidth: 1.8,
-    lineWidthMinPixels: 1.2,
+    // 配色：先试过深褐 [90,30,18]、深靛紫 [96,58,142]，与砖红填充相比
+    // 明度差都不够（都偏暗），线条在色块上"陷"进去。
+    // 现改为高饱和正红 —— 既换了色相，也把明度提上来，双维度都能拉开距离。
+    getLineColor: [226, 36, 42, 250],
+    getLineWidth: 2.2,
+    lineWidthMinPixels: 1.4,
     pickable: false,
   });
 }
