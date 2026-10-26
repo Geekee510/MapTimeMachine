@@ -720,6 +720,13 @@ function buildChinaTerritoryLayer() {
     highlightColor: [255, 255, 255, 60],
     onClick: (info) => {
       chinaInfoOpen = true;
+      // 疆域层在政区层之下：政区数据空隙处的点击会落到这里。若坐标仍位于某个
+      // 政区多边形内（政区层因拾取次序/三角化等偶发未命中），优先弹政区卡。
+      const rp = regionPropsAtCoordinate(info.coordinate);
+      if (rp && panel) {
+        panel.showChinaRegion(rp, d);
+        return;
+      }
       if (panel) panel.showChinaInfo(d, info.object?.properties?.state, currentYear);
     },
   });
@@ -757,26 +764,70 @@ function buildChinaOutlineLayer() {
   });
 }
 
-// 历代政区界层：CHGIS 州/郡/府/路，只描边不填充，叠在疆域轮廓之上
-// （谭其骧《中国历史地图集》式呈现：疆域范围 + 内部政区界）
-function buildChinaRegionLayer() {
-  const d = getDynastyAtYear(currentYear);
-  if (!d || !chinaRegions || !chinaRegions.length) return null;
+// ── 政区要素与点包含检测（政区层 / 疆域层点击兜底 / 点击托底层共用）─────────
+// 当前朝代、当前年份应显示的政区要素（含 <3 时的整朝兜底，与渲染逻辑一致）
+function getChinaRegionFeats(d) {
+  if (!chinaRegions || !chinaRegions.length) return [];
   let feats = chinaRegions.filter(
     (f) => f.properties.dynasty === d.id && currentYear >= f.properties.beg && currentYear <= f.properties.end
   );
   // 兜底：某些朝代的政区年份区间覆盖不全（如唐末），过滤后过少则显示该朝代全部政区
   if (feats.length < 3) feats = chinaRegions.filter((f) => f.properties.dynasty === d.id);
+  return feats;
+}
+
+// 射线法点包含检测（支持带内环洞的 Polygon / MultiPolygon）
+function pointInRing(pt, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function pointInGeometry(pt, geom) {
+  if (!geom) return false;
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+  for (const p of polys) {
+    if (p[0] && pointInRing(pt, p[0])) {
+      let inHole = false;
+      for (let k = 1; k < p.length; k++) if (pointInRing(pt, p[k])) inHole = true;
+      if (!inHole) return true;
+    }
+  }
+  return false;
+}
+
+// 点击坐标处的政区属性。仅当政区开关开启时参与匹配；
+// CHGIS 数据存在空隙（如西汉的江汉平原、东汉三国两晋的汉江流域大片无政区多边形），
+// 空隙处返回 null，由调用方回落到朝代卡。
+function regionPropsAtCoordinate(coord) {
+  if (!layersState.region || !coord) return null;
+  const d = getDynastyAtYear(currentYear);
+  if (!d) return null;
+  for (const f of getChinaRegionFeats(d)) {
+    if (pointInGeometry(coord, f.geometry)) return f.properties;
+  }
+  return null;
+}
+
+// 历代政区界层：CHGIS 州/郡/府/路，只描边不填充，叠在疆域轮廓之上
+// （谭其骧《中国历史地图集》式呈现：疆域范围 + 内部政区界）
+function buildChinaRegionLayer() {
+  const d = getDynastyAtYear(currentYear);
+  if (!d) return null;
+  const feats = getChinaRegionFeats(d);
   if (!feats.length) return null;
   return new GeoJsonLayer({
     id: 'china-regions',
     data: { type: 'FeatureCollection', features: feats },
     stroked: true,
     // 【拾取关键】必须 filled:true，哪怕填充几乎全透明。
-    // deck.gl 的拾取走渲染管线：filled:false 时多边形内部根本不进拾取缓冲，
-    // 只有 0.5~0.8px 宽的描边可命中 → 表现为"点政区内没反应，只有刚好点在
-    // 界线上才弹卡片"。用 alpha=1 的填充既能保持"只看见界线"的观感，又让整块
-    // 区域可点击（1/255 的着色肉眼不可辨）。
+    // filled:false 时多边形内部不渲染任何片元，只有 0.5~0.8px 宽的描边可命中
+    // → 表现为"点政区内没反应，只有刚好点在界线上才弹卡片"。
+    // 拾取有效性由 picking 着色器的有效性标志决定、与填充透明度无关（已核对
+    // deck.gl v9 picking 模块源码），因此 alpha=1 的隐形填充可让整块区域可点击，
+    // 同时保持"只看见界线"的观感（1/255 的着色肉眼不可辨）。
     filled: true,
     getFillColor: [110, 60, 35, 1],
     getLineColor: [110, 60, 35, 170],
@@ -789,6 +840,39 @@ function buildChinaRegionLayer() {
       if (!info.object || !panel) return;
       chinaInfoOpen = true;
       panel.showChinaRegion(info.object.properties, d);
+    },
+  });
+}
+
+// 隐形点击托底层：垫在中国模式所有图层最下。
+// CHGIS 政区数据有空隙（汉江流域、江汉平原等大片无政区多边形），当「历史疆域」
+// 关闭时空隙处的点击不再有任何层接住（deck.gl 只回调"被命中"图层的 onClick），
+// 表现为"点了没反应"。此层用疆域要素做一层几乎透明的填充接住疆域范围内的全部点击：
+// 命中政区多边形 → 政区卡；落在数据空隙 → 朝代卡。
+// 仅当政区开关开启时存在（用户显式关掉政区界时不改变任何点击行为）。
+function buildChinaClickCatcher() {
+  if (!layersState.region) return null;
+  const d = getDynastyAtYear(currentYear);
+  if (!d || !chinaDynasties) return null;
+  const feats = chinaDynasties.filter(
+    (f) => f.properties.id === d.id
+      && (f.properties.sStart == null || (currentYear >= f.properties.sStart && currentYear <= f.properties.sEnd))
+  );
+  if (!feats.length) return null;
+  return new GeoJsonLayer({
+    id: 'china-click-catcher',
+    data: { type: 'FeatureCollection', features: feats },
+    filled: true,
+    stroked: false,
+    getFillColor: [0, 0, 0, 1], // alpha=1：隐形但可拾取（有效性标志与 alpha 无关）
+    pickable: true,
+    autoHighlight: false,
+    onClick: (info) => {
+      if (!panel || !info.coordinate) return;
+      chinaInfoOpen = true;
+      const rp = regionPropsAtCoordinate(info.coordinate);
+      if (rp) panel.showChinaRegion(rp, d);
+      else panel.showChinaInfo(d, null, currentYear);
     },
   });
 }
@@ -849,6 +933,9 @@ function updateLayers() {
   const layers = [];
   if (mode === 'china') {
     // 中国历代疆域：朝代疆域 + 都城，河流/山脉/湖泊作背景（按面板开关）
+    // 隐形点击托底层垫在最下：疆域关闭时政区数据空隙处的点击也有响应
+    const catcher = buildChinaClickCatcher();
+    if (catcher) layers.push(catcher);
     if (layersState.territory) {
       // 疆域填充：省界拼接底图【始终绘制】（台湾 / 西藏 / 外蒙古等在我们自己维护的
       // 省份清单里，historical-basemaps 的王朝轮廓常缺这些地区，早期版本用轮廓
