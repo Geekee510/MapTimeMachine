@@ -10,6 +10,14 @@ import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
 import { createPanel } from './ui/panel.js';
+import {
+  buildChinaHistLayers,
+  buildChinaHistBaseLayers,
+  getChinaHistYearEvents,
+  getPolityInfo,
+  CHINA_HIST_MIN,
+  CHINA_HIST_MAX,
+} from './modes/chinaHist/index.js';
 
 const YEAR_MIN = -3000; // 世界模式下限：公元前 3000 年（此前为史前考古文化，不做政治疆域）
 const YEAR_MAX = 2023;
@@ -45,13 +53,26 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, outline: true, region: true, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false };
+const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, zh: true };
+
+// 各模式进入时的图层默认（切到该模式即套用，并同步面板勾选）。
+// 中国历史模式默认：历史疆域 / 主要河流 / 地形渲染 / 中文标签 / 政权疆域 开，其余关；
+// 另加「当代省界(参考)」作为浅色无交互参考底板，默认开。
+const MODE_LAYER_DEFAULTS = {
+  world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, zh: true },
+  china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, zh: true },
+  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  zh: true },
+};
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
 let chinaDynasties = null; // china_dynasties.geojson 的 features 数组（省界拼接的疆域底图）
 let chinaOutlines = null; // china_outline.geojson：historical-basemaps 提取的王朝疆域轮廓（更接近史实）
 let chinaRegions = null; // china_regions.geojson：CHGIS 历代政区界（州/郡/府/路），叠在疆域之上
+let chinaProvinces = null; // 当代省级地图底板（DataV GeoJSON，运行时拉取，仅作浅色参考线，无交互）
+let chinaProvincesLoaded = false; // 是否已触发过省界加载（懒加载，仅一次）
 let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
+let histInfoOpen = false; // 第三模式（中国历史地图）信息卡是否打开
+let histLastPolityId = null; // 当前展示的政权 id（年份拖动时刷新该卡）
 
 // 底图陆地显隐：CShapes 疆域数据不含小岛屿，底图(demotiles)却会画出
 // 大量沿岸小岛 → 海面上出现"白色小点"。默认把底图陆地沉入海色，
@@ -970,6 +991,50 @@ function updateLayers() {
     deckOverlay.setProps({ layers });
     return;
   }
+  // 第三模式：中国历史地图（汉/唐/明 + 三国/南北朝/五代十国）
+  if (mode === 'chinaHist') {
+    // 当代省界底板（浅色无交互参考线）：最底层
+    if (layersState.provinceRef) {
+      const pb = buildChinaProvinceBaseLayer();
+      if (pb) layers.push(pb);
+    }
+    // 公共底图（河流/山脉/湖泊）复用既有 builder，不动其实现
+    if (layersState.river && rivers) {
+      const l = buildRiverLineLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.riverLabel && rivers) {
+      const l = buildRiverLabelLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
+    if (layersState.lake && lakes) {
+      const l = buildLakeLayer();
+      if (l) layers.push(l);
+    }
+    // 历史疆域（中央王朝底图，轻量无交互）
+    if (layersState.territory) {
+      const base = buildChinaHistBaseLayers({ year: currentYear, chinaOutlines });
+      if (base && base.length) layers.push(...base);
+    }
+    if (layersState.polity) {
+      const hist = buildChinaHistLayers({
+        year: currentYear,
+        chinaOutlines,
+        labelChars,
+        labelFontSettings,
+        labelFontFamily: LABEL_FONT_FAMILY,
+        onPolityPick: (id) => {
+          histLastPolityId = id;
+          histInfoOpen = true;
+          if (panel) panel.showPolity(getPolityInfo(id, currentYear));
+        },
+      });
+      layers.push(...hist);
+    }
+    deckOverlay.setProps({ layers });
+    return;
+  }
   // 世界模式
   if (layersState.territory) {
     if (currentYear < CSHAPES_START) {
@@ -1140,8 +1205,48 @@ async function loadChinaRegions() {
   }
 }
 
+// 当代省级地图底板（仅中国历史模式用作浅色无交互参考线）。
+// 数据来源：阿里 DataV.GeoAtlas 标准行政区划（公共地理边界，非受版权保护的专题地图描绘），
+// 运行时按需拉取，不随仓库分发（与 historical-basemaps 同源策略一致）。
+// 非阻断：网络不可用或拉取失败时静默跳过，不影响其他图层。
+async function loadChinaProvinces() {
+  try {
+    const res = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json');
+    if (res.ok) {
+      const gj = await res.json();
+      chinaProvinces = gj.features || [];
+      console.info(`[chinahist] 已加载当代省界底板 ${chinaProvinces.length} 个要素`);
+      if (mode === 'chinaHist') updateLayers();
+    } else {
+      console.warn('[chinahist] 当代省界底板拉取失败（HTTP ' + res.status + '），参考线将不显示');
+    }
+  } catch (e) {
+    console.warn('[chinahist] 当代省界底板加载失败（可选）：', e.message);
+  }
+}
+
+// 当代省级地图底板图层：极浅填充 + 浅灰描边，无交互（pickable:false），作参考线。
+// 始终绘制在最底层（在 updateLayers 中先于其他图层 push）。
+function buildChinaProvinceBaseLayer() {
+  if (!chinaProvinces || !chinaProvinces.length) return null;
+  return new GeoJsonLayer({
+    id: 'chinahist-province',
+    data: { type: 'FeatureCollection', features: chinaProvinces },
+    stroked: true,
+    filled: true,
+    getFillColor: [240, 238, 230, 22],
+    getLineColor: [150, 150, 150, 130],
+    getLineWidth: 0.7,
+    lineWidthMinPixels: 0.5,
+    pickable: false,
+  });
+}
+
 // 年份事件内容（供时间轴年份读数点击）：世界模式=世界大事，中国模式=朝代信息
 function getYearEvents(y) {
+  if (mode === 'chinaHist') {
+    return getChinaHistYearEvents(y);
+  }
   if (mode === 'china') {
     const d = getDynastyAtYear(y);
     if (!d) return { title: `📜 ${fmtYear(y)} · 暂无对应朝代`, items: [] };
@@ -1156,7 +1261,12 @@ function setMode(m) {
   mode = m;
   document.getElementById('mode-world')?.classList.toggle('active', m === 'world');
   document.getElementById('mode-china')?.classList.toggle('active', m === 'china');
+  document.getElementById('mode-chinahist')?.classList.toggle('active', m === 'chinaHist');
+  const legendEl = document.getElementById('legend');
+  if (legendEl) legendEl.style.display = m === 'world' ? '' : 'none';
   chinaInfoOpen = false;
+  histInfoOpen = false;
+  histLastPolityId = null;
   // 关闭介绍卡：必须走 panel.hide() 清空内部 lastProps 状态。
   // 此前只直接给 DOM 加 hidden，lastProps 仍在，之后任意图层开关触发 rerender()
   // 会把上一模式的国家卡重新弹出来（世界点国家→切中国→取消历史疆域→弹框）。
@@ -1169,11 +1279,28 @@ function setMode(m) {
   }
   // 面板项随模式调整：「历代政区界」仅中国疆域模式有意义（世界模式隐藏该开关）
   if (panel && panel.setMode) panel.setMode(m);
+  // 套用该模式的图层默认，并同步面板勾选（首次进入中国历史模式会切换成其专属默认）
+  const def = MODE_LAYER_DEFAULTS[m];
+  if (def) {
+    Object.keys(def).forEach((k) => { layersState[k] = def[k]; });
+    if (panel && panel.syncCheckboxes) panel.syncCheckboxes(layersState);
+    applyRelief();      // MapLibre 地形晕渲需随默认值重新生效
+    applyBasemapLand(); // 今地图开关同理
+  }
+  // 首次进入中国历史模式时懒加载当代省界参考底图（非阻断：失败静默跳过）
+  if (m === 'chinaHist' && !chinaProvincesLoaded) {
+    chinaProvincesLoaded = true;
+    loadChinaProvinces();
+  }
   if (m === 'china') {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
     map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
     // 中国模式：不自动弹出介绍卡（信息卡已随模式切换关闭），待用户点击某个政权/朝代再打开
+  } else if (m === 'chinaHist') {
+    currentYear = CHINA_HIST_MIN + 8; // 落在西汉存续内（含淡入）
+    if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, currentYear);
+    map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
   } else {
     currentYear = 1960;
     if (timeline) timeline.setRange(YEAR_MIN, YEAR_MAX, currentYear);
@@ -1245,6 +1372,13 @@ async function init() {
         if (mode === 'china') {
           // 中国模式：拖动年份时若信息卡打开，则刷新为该年所属朝代
           if (chinaInfoOpen && panel) panel.showChinaInfo(getDynastyAtYear(y), undefined, y);
+        } else if (mode === 'chinaHist') {
+          // 第三模式：年份拖动时若政权卡打开，刷新该政权（已不存续则关闭）
+          if (histInfoOpen && panel) {
+            const p = histLastPolityId ? getPolityInfo(histLastPolityId, y) : null;
+            if (p && p.alpha > 0) panel.showPolity(p);
+            else { histInfoOpen = false; panel.hide(); }
+          }
         } else if (panel) {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
           // 则换成该时段的属性重绘（存续/历时/事件随之更新）；已不存在则清空介绍卡。
@@ -1288,9 +1422,10 @@ async function init() {
     });
     // 初始模式为世界地图：隐藏只对中国疆域生效的「历代政区界」开关
     if (panel && panel.setMode) panel.setMode(mode);
-    // 世界/中国模式切换
+    // 世界/中国/中国历史 模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));
+    document.getElementById('mode-chinahist')?.addEventListener('click', () => setMode('chinaHist'));
     // 后台加载中国疆域：底图 + 王朝轮廓 + 历代政区
     Promise.all([loadChina(), loadChinaOutline(), loadChinaRegions()]).then(() => {
       if (mode === 'china') updateLayers();

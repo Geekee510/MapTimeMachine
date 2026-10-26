@@ -15,6 +15,7 @@
     <div id="mode-switch">
       <button id="mode-world" class="active" type="button">世界地图</button>
       <button id="mode-china" type="button">中国疆域</button>
+      <button id="mode-chinahist" type="button">中国历史</button>
     </div>
 
     <!-- 加载提示 -->
@@ -55,6 +56,11 @@
         <div class="panel-divider"></div>
         <label id="row-outline"><input type="checkbox" id="toggle-outline" checked /> 史实边界参考线</label>
         <label id="row-region"><input type="checkbox" id="toggle-region" checked /> 历代政区界（州/府）</label>
+      </div>
+      <div id="group-chinahist" style="display:none">
+        <div class="panel-divider"></div>
+        <label id="row-polity"><input type="checkbox" id="toggle-polity" checked /> 政权疆域</label>
+        <label id="row-province"><input type="checkbox" id="toggle-province" checked /> 当代省界（参考线）</label>
       </div>
       <button id="reset-view">复位视图</button>
       <div class="panel-note">底图：MapLibre demotiles（含陆地/水域/国界）<br/>疆域：CShapes 2.1（CC BY-NC-SA）<br/>河流/山脉/湖泊：Natural Earth（公共领域，需先运行 <code>npm run fetch-data</code>）</div>
