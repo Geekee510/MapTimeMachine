@@ -8,10 +8,10 @@
 //   （战争动画每帧新建图层）场景下加载会失败；失败后 deck 退回自动打包模式，而
 //   getIcon 返回的是图集键名而非图片地址 → 图标静默不显示（实测关隘只剩个别出现）。
 //
-//   行军方向 = PathLayer 走线 + 队头一个**骑马小人图钉**（同样走 MapLibre Marker，
-//   按 bearing 旋转、跑动时有起伏动画）。两军接触后小人消失，原地换成"交战"图标。
-//   旧版用 PolygonLayer 画三角箭头，被骑马的图钉取代（箭头方向再准也不如一个会转身
-//   的小人直观）。
+//   行军方向 = PathLayer 走线 + 队头一个**小三角箭头图钉**（同样走 MapLibre Marker，
+//   按行进方位角旋转）。两军接触后箭头消失，原地换成"交战"图标。
+//   （中途试过"骑马小人"，40px 下细节糊成一团、且侧视剪影只能左右翻转无法表达
+//   南北向行军，已改回三角箭头。）
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { PASSES, passById } from './passes.js';
 import { citiesAtYear, cityNameAt, cityAliasText, cityById } from './cities.js';
@@ -163,10 +163,10 @@ export function buildCityLayers(o = {}) {
   return layers;
 }
 
-// —— 战争图钉：行军中的人马 / 接触后的交战图标 ——
-// 一支部队一个"骑马小人"，位置 = 队头、朝向 = 行进方位角；
-// 两支（或以上）部队都抵达战场后，小人全部撤下，原地换成一个"交战"图标。
-// 点击小人或交战图标都能弹出整场战争的背景卡。
+// —— 战争图钉：行军的三角箭头 / 接触后的交战图标 ——
+// 一支部队一个"小三角箭头"，位置 = 队头、朝向 = 行进方位角（--rot 旋转）；
+// 两支（或以上）部队都抵达战场后，箭头全部撤下，原地换成一个"交战"图标。
+// 点击箭头或交战图标都能弹出整场战争的背景卡。
 const clamp01 = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
 
 export function warPins(year, progress, o = {}) {
@@ -200,16 +200,15 @@ export function warPins(year, progress, o = {}) {
       const frac = p1 > p0 ? clamp01((p - p0) / (p1 - p0)) : 1;
       const { head, headAngle } = traveledPath(f.route, frac);
       if (!head) continue;
-      // 朝向：侧视图只做左右翻转。headAngle 是方位角（正北 0°、顺时针），
-      // 正弦分量的符号即"向东 / 向西"：往西走就镜像成面朝左，人马始终正立。
-      const flip = Math.sin((headAngle * Math.PI) / 180) < -0.06 ? -1 : 1;
       out.push({
-        id: `rider-${w.id}-${f.party}`,
-        kind: 'rider',
+        id: `arrow-${w.id}-${f.party}`,
+        kind: 'tri',
         coord: head,
-        flip,
+        // 三角是俯视图形，可以直接按方位角旋转（尖朝北 = 0°），
+        // 这点和侧视剪影不同 —— 侧视只能左右翻转、永不上仰或倒立。
+        rot: headAngle,
         color: party.color,
-        idle: routeLength(f.route) < 1e-6, // 守军原地不动 → 关掉跑动动画
+        idle: routeLength(f.route) < 1e-6, // 守军原地不动 → 不闪动
         label: '',
         selected: false,
         payload: { warId: w.id },
@@ -221,7 +220,7 @@ export function warPins(year, progress, o = {}) {
 
 // —— 战争动画图层（军队演进）——
 // 淡色完整路线 + 已行进粗线 + 军队名。
-// 队头不再是三角箭头/圆点，而是由 warPins() 给出的**骑马小人图钉**（DOM Marker）。
+// 队头不再是圆点，而是由 warPins() 给出的**三角箭头图钉**（DOM Marker）。
 // progress = 0..1 的**动画进度**（不再是年份）。按进度驱动的好处：无论一场战争
 // 在史料上只占 1 个月还是 3 年，回放时长都恒定，且不会因"年份跨度 < 最小跨度"
 // 让军队卡在半路（旧版就是因此停在中途）。

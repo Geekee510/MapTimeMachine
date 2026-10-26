@@ -8,9 +8,14 @@ import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { politiesAtYear, polityById, eraAtYear } from '../../data/polities/index.js';
 import { buildPolityGeometries } from './territoryGen.js';
 
-// 时间轴范围：夏（约前 2070）至明末清初前夜。
+// 时间轴范围：**先秦传说上限（约前 2700）** 至明末清初前夜。
+// 下限不再卡在夏（前 2070）：战争库里"涿鹿之战"记在前 2600（上古传说），
+// 若下限是前 2070，跳转时年份会被夹到 -2070，超出该战 [前2600, 前2600] 的窗口，
+// → onYear 里"拖离战场年份就结束回放"的守卫立刻把回放踢掉，表现为"点了没演示"，
+// 而战争面板仍挂着"回放中"，于是退出按钮点了没反应。多给的 630 年没有政权数据，
+// 地图上只有底图与行军路线，正好用来放这一场传说战役。
 // 清代及以后的近代史由单独的地图承载，不在此模式内。
-export const CHINA_HIST_MIN = -2070;
+export const CHINA_HIST_MIN = -2700;
 export const CHINA_HIST_MAX = 1644;
 
 const FADE = 4; // 政权存续边界处的淡入/淡出年数（近似"扩张/更迭"过渡）

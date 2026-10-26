@@ -1079,7 +1079,7 @@ function ensureWarAnim() {
       focusWarId,
     });
     deckOverlay.setProps({ layers: [...histStaticLayers, ...warLayers] });
-    syncPins(); // 人马图钉跟着进度走（DOM Marker，不占 deck 图层）
+    syncPins(); // 三角箭头图钉跟着进度走（DOM Marker，不占 deck 图层）
     warRaf = requestAnimationFrame(tick);
   };
   warRaf = requestAnimationFrame(tick);
@@ -1094,8 +1094,10 @@ function replayWar() {
 }
 
 // 结束战争回放（回到"只看疆域"的状态）：图层、图钉、列表高亮、状态条一并清掉
+// 注意：**即使 focusWarId 已经是 null 也要清面板/列表**。此前函数开头有
+// `if (!focusWarId) return;`，一旦回放被别处提前取消（如年份守卫），面板还停在
+// "回放中 + 重播/退出"，而按钮点下去因为 focusWarId 为空直接返回 —— 就是"退出失灵"。
 function exitWar() {
-  if (!focusWarId) return;
   focusWarId = null;
   warProgress = null;
   warHoldAcc = 0;
@@ -1112,7 +1114,10 @@ function jumpToWar(warId) {
   if (!w) return;
   if (mode !== 'chinaHist') setMode('chinaHist');
   focusWarId = w.id;
-  const y = Math.floor(w.meta.start);
+  // 年份必须夹在时间轴范围内：setRange → setYear 会自己做一次夹取，
+  // 若这里传的范围外年份（如涿鹿 前2600 而时间轴本来从前2070 起），
+  // onYear 收到的是被夹过的年份，与战争窗口对不上，回放会被立刻结束。
+  const y = Math.min(CHINA_HIST_MAX, Math.max(CHINA_HIST_MIN, Math.round(w.meta.start)));
   currentYear = y;
   warProgress = 0;
   warHoldAcc = 0;
@@ -1130,8 +1135,8 @@ function jumpToWar(warId) {
   warList?.close();
 }
 
-// 图钉同步：关隘（静态）+ 战争人马/交战图标（随动画进度移动）。
-// 静态图层重建与动画逐帧都走这一个入口 —— 逐帧只动"人马"的位置与朝向，
+// 图钉同步：关隘（静态）+ 战争三角箭头/交战图标（随动画进度移动）。
+// 静态图层重建与动画逐帧都走这一个入口 —— 逐帧只动箭头的位置与朝向，
 // deck 侧也只重建两条路线图层，代价很小。
 function syncPins() {
   if (!pinLayer) return;
@@ -1150,7 +1155,7 @@ function syncPins() {
         updateLayers(); // 重绘以显示选中态
       } else if (pin.kind === 'clash' || pin.kind === 'battle') {
         if (panel) panel.showPlace(battleCard(pin.payload)); // 交战点 → 整场战争的背景卡
-      } else if (pin.kind === 'rider') {
+      } else if (pin.kind === 'rider' || pin.kind === 'tri') {
         const w = warById(pin.payload?.warId);
         if (w && panel) panel.showPlace(warCard(w));
       }
@@ -1245,7 +1250,7 @@ function updateLayers() {
       const pr = buildChinaProvinceRefLayer();
       if (pr) layers.push(pr);
     }
-    // 关隘 / 战争人马 / 交战点：走图钉层（DOM Marker，见 ui/pinLayer.js），不参与 deck 图层
+    // 关隘 / 行军三角箭头 / 交战点：走图钉层（DOM Marker，见 ui/pinLayer.js），不参与 deck 图层
     syncPins();
     // 城市 / 治所（独立图层，可点击看简介；城名随年份变化，按 rank+zoom 分级显示）
     if (layersState.city) {
@@ -1711,9 +1716,15 @@ async function init() {
             else { histInfoOpen = false; panel.hide(); }
           }
           // 拖离该场战争所在年份 → 结束回放（exitWar 一并清图层/图钉/状态条）
+          // 守卫窗口必须用**夹到时间轴范围内**后的年份区间：战争年份可能整体落在
+          // 时间轴之外（或边界外一点），jumpToWar 传入的年份会被 setRange 夹取，
+          // 直接拿 meta.start/end 比较就会误判"已拖离"，回放刚起手就被结束。
           if (focusWarId) {
             const fw = warById(focusWarId);
-            if (!fw || y < Math.floor(fw.meta.start) || y > Math.ceil(fw.meta.end)) exitWar();
+            const clampYear = (v) => Math.min(CHINA_HIST_MAX, Math.max(CHINA_HIST_MIN, v));
+            const lo = fw ? clampYear(Math.floor(fw.meta.start)) : 0;
+            const hi = fw ? clampYear(Math.ceil(fw.meta.end)) : 0;
+            if (!fw || y < lo || y > hi) exitWar();
           }
         } else if (panel) {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，

@@ -53,99 +53,17 @@ const SWORDS = `
   </g>
 </svg>`;
 
-const HORSE = '#a9703a';
-const HORSE_DARK = '#8a5729';
-const LINE = '#2a1a0b';
-
-// 骑马的武将（侧视、朝右，参考"连环画骑将"的剪影）
-// ---------------------------------------------------------------------------
-// 三条硬约束（前几版都踩过）：
-//   ① 侧视图**不能跟着方位角转圈**。旧实现把 bearing 塞进 transform，向南行进时
-//      整匹马颠倒（马腿朝天、骑手头朝下）——这就是"头朝下了"。现在只做
-//      scaleX(±1) 左右翻转，人马永远站在地上。
-//   ② 腿不能是细黑线：56×40 的画布里，2.4px 的单 stroke 会读成"蜘蛛腿"。改为
-//      **深描边 + 浅马腿**的双层描边（先 4px 近黑、再 2.2px 棕），末端补一块蹄子。
-//   ③ 骑手不能是"瓶子"：要有明显更宽的肩甲、前倾的身体、垂在马腹侧的大腿，
-//      否则缩到实际尺寸只剩一根竖条。
-const LEG = (d, hoof) => `
-    <path d="${d}" fill="none" stroke="${LINE}" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="${d}" fill="none" stroke="${HORSE_DARK}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="${hoof}" fill="none" stroke="${LINE}" stroke-width="3.2" stroke-linecap="round"/>`;
-
-const RIDER = `
-<svg viewBox="0 0 56 40" width="54" height="38.6" aria-hidden="true">
-  <!-- 落地阴影：让人马"站在"地图上，不飘 -->
-  <ellipse cx="29" cy="34.6" rx="16" ry="2.2" fill="#2a1a0b" opacity="0.15"/>
-
-  <!-- 远侧两腿（先画，被身体压住，天然有前后层次） -->
-  <g class="h-leg h-rear-far" opacity="0.85">${LEG('M18.6 24 L14.4 28.4 L12.8 32.2', 'M12.8 32.2 L10.4 33')}</g>
-  <g class="h-leg h-front-far" opacity="0.85">${LEG('M35.4 24.4 L37.4 28.8 L38.6 32.4', 'M38.6 32.4 L40.8 33')}</g>
-
-  <!-- 尾巴：根粗梢细，两笔叠出层次 -->
-  <g class="h-tail" fill="none" stroke="${LINE}" stroke-linecap="round">
-    <path d="M14.2 17.2 C 9.6 15.8 5.4 17.6 3.4 22.2" stroke-width="3.6" opacity="0.9"/>
-    <path d="M14.2 17.2 C 9.6 15.8 5.4 17.6 3.4 22.2" stroke-width="1.7" stroke="#4a3220"/>
-    <path d="M13.4 20.4 C 9.8 19.8 7 21.4 5.4 24.8" stroke-width="1.7" stroke="#3a2717" opacity="0.9"/>
-  </g>
-
-  <g class="h-body">
-    <!-- 躯干 -->
-    <path d="M40 19 C 40.8 15.4 38.2 13.8 33.8 13.7 C 27.2 13.5 20 13.6 16.6 15.6
-             C 13.2 17.6 12.4 21.4 13.2 24.4 C 14 26.8 18.4 27.2 23.4 27 L 33.8 26.6
-             C 38.2 26.4 39.6 23.6 40 19 Z"
-          fill="${HORSE}" stroke="${LINE}" stroke-width="1.7" stroke-linejoin="round"/>
-    <!-- 颈部（粗带，上缘即颈脊） -->
-    <path d="M35.4 20.6 C 36.4 14.4 40 9.2 45.6 6.6 L 48.6 11.8 C 44.8 14 42.4 17.6 41.4 21.8 Z"
-          fill="${HORSE}" stroke="${LINE}" stroke-width="1.7" stroke-linejoin="round"/>
-    <!-- 头：额 → 鼻梁 → 圆口 → 下颌 → 颊（要够"长脸"，短了就读成鸟嘴） -->
-    <path d="M45.4 6.6 C 48 6.4 50.8 7.4 52.6 9 L 55 11.2 C 55.4 12.2 54.6 13.2 53.4 13.2
-             C 51.6 13.2 49.6 12.4 48.2 11.2 C 46.6 10 45.6 8.6 45.2 7.4 Z"
-          fill="${HORSE}" stroke="${LINE}" stroke-width="1.7" stroke-linejoin="round"/>
-    <!-- 鬃毛：贴着颈脊的一条带（不是盖住半个脖子的大三角） -->
-    <path d="M36.4 19.4 C 37.4 13.4 40.6 8.8 45.6 6.6 L 46.6 9.2 C 42.8 11.4 40.2 15 39.4 19.8 Z"
-          fill="${LINE}" opacity="0.8"/>
-    <!-- 耳（向后上方）+ 额前一撮鬃 -->
-    <path d="M45.4 6.6 L45 2.6 L47.4 6.2 Z" fill="${HORSE}" stroke="${LINE}" stroke-width="1.2" stroke-linejoin="round"/>
-    <path d="M45.6 6.6 L47.4 3.6 L48.4 6.6 Z" fill="${LINE}" opacity="0.75"/>
-    <!-- 眼 / 鼻孔 / 笼头 -->
-    <circle cx="49.2" cy="9.4" r="0.9" fill="${LINE}"/>
-    <path d="M54.4 11.4 L53.4 11.5" stroke="${LINE}" stroke-width="1" fill="none"/>
-    <path d="M47.6 7.6 C 48.6 9.4 49.6 10.8 50.8 12.2" stroke="#6b3a12" stroke-width="1.1" fill="none"/>
-  </g>
-
-  <!-- 鞍垫（暗红 + 金边） -->
-  <path d="M22 14 C 25.8 12.2 32.2 12.2 35 14.2 L 36 20.8 L 21.2 21.2 Z"
-        fill="#8f2f1e" stroke="${LINE}" stroke-width="1.2" stroke-linejoin="round"/>
-  <path d="M21.4 20.4 L35.7 20" stroke="#d9a13a" stroke-width="1.1" fill="none"/>
-
-  <!-- 骑将：甲胄用阵营色（--pin-color），头盔深铁灰 + 红缨，肩甲加宽 -->
-  <g class="h-rider">
-    <!-- 躯干（微微前倾） -->
-    <path d="M25.4 14 L26.6 8.4 L31.6 7.8 L32.8 13.8 Z"
-          fill="var(--pin-color, #b2543a)" stroke="${LINE}" stroke-width="1.3" stroke-linejoin="round"/>
-    <!-- 肩甲（比躯干宽，这是"人"读得出来的关键） -->
-    <path d="M24.8 9.4 C 26 6.8 32.2 6.6 33.4 9.4 L 32.6 11.2 L 25.6 11.4 Z"
-          fill="var(--pin-color, #b2543a)" stroke="${LINE}" stroke-width="1.2" stroke-linejoin="round"/>
-    <!-- 头 + 头盔 + 红缨 -->
-    <circle cx="29" cy="5" r="2.6" fill="#f6e0bb" stroke="${LINE}" stroke-width="1.1"/>
-    <path d="M26.2 4.6 C 26.4 1.4 31.6 1.4 31.8 4.6 L 33.2 5.2 L 25.4 5.2 Z"
-          fill="#5a5f6b" stroke="${LINE}" stroke-width="1.1" stroke-linejoin="round"/>
-    <path d="M29 1.6 C 28.2 0.4 29.8 0 30.6 1" fill="none" stroke="#c8371c" stroke-width="1.5" stroke-linecap="round"/>
-    <!-- 前伸持缰的手臂 -->
-    <path d="M31 9.4 L36.4 11.5" fill="none" stroke="${LINE}" stroke-width="2.4" stroke-linecap="round"/>
-    <path d="M31 9.4 L36.4 11.5" fill="none" stroke="var(--pin-color, #b2543a)" stroke-width="1.2" stroke-linecap="round"/>
-    <!-- 大腿（前伸）+ 小腿（下垂）+ 靴 -->
-    <path d="M27 14 L31.8 17.4 L32.8 22" fill="none" stroke="${LINE}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M27 14 L31.8 17.4 L32.8 22" fill="none" stroke="#7a4a22" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M31.4 22.6 L34.2 23.4" stroke="${LINE}" stroke-width="2.6" stroke-linecap="round"/>
-  </g>
-
-  <!-- 缰绳：手 → 马嘴（这一笔最能说明"有人在骑"） -->
-  <path d="M36.6 11.6 C 42.4 13.8 49.4 13.2 54 10.8" fill="none" stroke="#5a3010" stroke-width="1.05" opacity="0.92"/>
-
-  <!-- 近侧两腿（画在最上层，跑动时最醒目） -->
-  <g class="h-leg h-rear-near">${LEG('M16.4 24.4 L11.4 28.4 L8.6 32.2', 'M8.6 32.2 L6.2 33')}</g>
-  <g class="h-leg h-front-near">${LEG('M37.6 24.8 L40.6 28.6 L43.4 32.2', 'M43.4 32.2 L45.6 33')}</g>
+// 行军方向：小三角箭头（尖朝正北，靠 CSS 的 --rot 旋到行进方位角）。
+// 曾试过"骑马小人"侧视剪影：马腿动画、鬃毛、长马脸在 40px 的实际尺寸下细节全糊，
+// 远看还不如一个干净的三角准 —— 尺寸小、方向明确、不挡路线。
+// 比例刻意做"窄高"（13×20，尖角约 34°、底角约 73°）：宽扁三角转到斜向时，
+// 底角比尖角还尖，方向会读不出来；窄高之后尖角永远是最尖的那个角。
+// 填充取阵营色（--pin-color），近黑描边 + CSS 白晕，浅底深底都能分辨。
+const TRI = `
+<svg viewBox="0 0 14 22" width="13" height="20.4" aria-hidden="true">
+  <path d="M7 1 L13.2 20.6 H0.8 Z"
+        fill="var(--pin-color, #b2543a)" stroke="#2a1a0b" stroke-width="1.5"
+        stroke-linejoin="round"/>
 </svg>`;
 
 // 交战：双刀交叉 + 冲击星芒 + 外扩红环（"两军接触"的爆点）。
@@ -174,7 +92,7 @@ const CLASH = `
   </g>
 </svg>`;
 
-const ICONS = { pass: TOWER, battle: CLASH, clash: CLASH, rider: RIDER };
+const ICONS = { pass: TOWER, battle: CLASH, clash: CLASH, tri: TRI, rider: TRI };
 
 export function pinIcon(kind) {
   return ICONS[kind] || TOWER;
