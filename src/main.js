@@ -563,6 +563,8 @@ function buildMountainLayers() {
 }
 
 // 湖泊：蓝色半透明面 + 细边
+// 透明度比早先略高（130→160）：洞庭、鄱阳这类湖在疆域填充之上若太淡，只剩一片
+// 灰蓝，和"没有这个湖"几乎一样。填充重一点，湖泊才读得出来是水面。
 function buildLakeLayer() {
   if (!lakes) return null;
   return new GeoJsonLayer({
@@ -570,8 +572,8 @@ function buildLakeLayer() {
     data: lakes,
     stroked: true,
     filled: true,
-    getFillColor: [70, 130, 200, 130],
-    getLineColor: [40, 90, 160, 180],
+    getFillColor: [70, 130, 200, 160],
+    getLineColor: [40, 90, 160, 200],
     getLineWidth: 0.5,
     lineWidthMinPixels: 0.3,
     pickable: false,
@@ -1225,20 +1227,6 @@ function updateLayers() {
   }
   // 第三模式：中国古代史（汉/唐/明 + 三国/南北朝/五代十国）
   if (mode === 'chinaHist') {
-    // 公共底图（河流/山脉/湖泊）复用既有 builder，不动其实现
-    if (layersState.river && rivers) {
-      const l = buildRiverLineLayer();
-      if (l) layers.push(l);
-    }
-    if (layersState.riverLabel && rivers) {
-      const l = buildRiverLabelLayer();
-      if (l) layers.push(l);
-    }
-    if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
-    if (layersState.lake && lakes) {
-      const l = buildLakeLayer();
-      if (l) layers.push(l);
-    }
     // 历史疆域（中央王朝底图，轻量无交互）：
     // 「政权疆域」已覆盖全部政权（含中央王朝），两层同时开会把填充叠两遍 → 颜色变深、
     // 下面的省界线又看不清。故政权层开启时不再画这层底图，只在其关闭时兜底。
@@ -1261,6 +1249,23 @@ function updateLayers() {
         },
       });
       layers.push(...hist);
+    }
+    // 公共底图（河流 / 河流名 / 山脉 / 湖泊）——**必须排在疆域填充之后**。
+    // deck.gl 按数组顺序叠放，先入的在下层；此前这一段写在疆域之前，河流与湖泊被
+    // 半透明政权填充整片盖住，只剩一点灰蓝色，洞庭湖、淮河几乎分辨不出来。
+    // 与中国疆域模式的顺序保持一致（那边一直是先疆域后水系）。
+    if (layersState.river && rivers) {
+      const l = buildRiverLineLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.riverLabel && rivers) {
+      const l = buildRiverLabelLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
+    if (layersState.lake && lakes) {
+      const l = buildLakeLayer();
+      if (l) layers.push(l);
     }
     // 当代省界（参考线，仅虚线不填充）：画在疆域之上，否则会被填充盖暗；
     // 虚线由 LineLayer 逐段画（deck 没有 dash 扩展，30 个省界拆成短段更可控）
@@ -1383,11 +1388,48 @@ const FALLBACK_STYLE = {
   layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#0d1b2a' } }],
 };
 
+// —— 中国水系补充集（scripts/gen-china-hydro.mjs 生成，NE 1:10m 裁切）——
+// 底图的河流/湖泊来自 Natural Earth 1:50m，那个级别对中国内部删减很多：
+// 河流只剩黄河/长江/珠江/黑龙江等干流（**淮河整条没有**），湖泊收了鄱阳/太湖/洪泽/
+// 巢湖/呼伦却**独独漏掉洞庭湖**。这里是 1:10m 裁出来的补充集，只补 50m 缺的那部分：
+// 同名以 50m 为准（否则黄河、长江会被画两遍、颜色叠加变深）。
+let hydroExtraPromise = null;
+function loadHydroExtra() {
+  if (!hydroExtraPromise) {
+    hydroExtraPromise = fetch('./data/china_hydro.geojson')
+      .then((r) => (r.ok ? r.json() : null))
+      .catch((e) => {
+        console.warn('[hydro] 水系补充集加载失败（可运行 node scripts/gen-china-hydro.mjs）：', e.message);
+        return null;
+      });
+  }
+  return hydroExtraPromise;
+}
+
+function mergeHydro(gj, kind) {
+  const target = kind === 'river' ? rivers : lakes;
+  if (!gj || !gj.features?.length || !target?.features) return;
+  const have = new Set(
+    target.features.map((f) => (f.properties?.name || '').trim().toLowerCase()).filter(Boolean)
+  );
+  let added = 0;
+  for (const f of gj.features) {
+    if (f.properties?.kind !== kind) continue;
+    const key = (f.properties.name || '').trim().toLowerCase();
+    if (!key || have.has(key)) continue;
+    have.add(key);
+    target.features.push(f);
+    added++;
+  }
+  if (added) console.info(`[hydro] 补充 ${added} 个${kind === 'river' ? '河段' : '湖泊'}`);
+}
+
 async function loadRivers() {
   try {
     const res = await fetch('./data/ne_rivers.geojson');
     if (res.ok) {
       rivers = await res.json();
+      mergeHydro(await loadHydroExtra(), 'river');
       console.info(`[rivers] 已加载 ${rivers.features?.length || 0} 条河流`);
     } else {
       console.warn('[rivers] 未找到 ne_rivers.geojson（请运行 npm run fetch-data）');
@@ -1416,6 +1458,7 @@ async function loadLakes() {
     const res = await fetch('./data/ne_lakes.geojson');
     if (res.ok) {
       lakes = await res.json();
+      mergeHydro(await loadHydroExtra(), 'lake'); // 补上 50m 漏掉的洞庭湖
       console.info(`[lakes] 已加载 ${lakes.features?.length || 0} 个湖泊`);
     } else {
       console.warn('[lakes] 未找到 ne_lakes.geojson（请运行 npm run fetch-data）');
