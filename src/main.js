@@ -1517,24 +1517,46 @@ async function loadChinaRegions() {
 }
 
 // 当代省级地图底板（仅中国古代史模式用作浅色无交互参考线）。
-// 数据来源：阿里 DataV.GeoAtlas 标准行政区划（公共地理边界，非受版权保护的专题地图描绘），
-// 运行时按需拉取，不随仓库分发（与 historical-basemaps 同源策略一致）。
-// 非阻断：网络不可用或拉取失败时静默跳过，不影响其他图层。
+// 数据来源：阿里 DataV.GeoAtlas 标准行政区划（公共地理边界，非受版权保护的专题地图描绘）。
+//
+// 【本地优先，远程兜底】—— 这个旋钮很关键，别改回"只拉远程"：
+//   chinaProvinces 是中国古代史「历史疆域」+「政权疆域」两层的**唯一几何来源**
+//   （territoryGen 靠 seg.provinces 关键词 → adcode → 省界多边形拼疆域）。
+//   此前只在运行时远程拉 DataV，线上部署后该接口按来源返回 403 →
+//   chinaProvinces 为 null → 两层全空，地图上只剩河流与关隘/城市图钉，
+//   表现为"远程部署完了之后疆域都不显示了"。
+//   仓库里本来就有同源副本 public/data/china_provinces.geojson（582KB，
+//   gen-china.mjs / gen-china-outline.mjs 用的就是它），改为本地优先后：
+//   零外部依赖、离线可跑、首屏更快（免一次跨境 HTTPS），远程仅在本地缺失时兜底。
 async function loadChinaProvinces() {
-  try {
-    const res = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json');
-    if (res.ok) {
-      const gj = await res.json();
-      chinaProvinces = gj.features || [];
-      console.info(`[chinahist] 已加载当代省界底板 ${chinaProvinces.length} 个要素`);
-      clearTerritoryCache(); // 省界到位后必须清缓存，否则疆域沿用"无数据"时空结果
-      if (mode === 'chinaHist') updateLayers();
-    } else {
-      console.warn('[chinahist] 当代省界底板拉取失败（HTTP ' + res.status + '），参考线将不显示');
+  let gj = null;
+  const sources = [
+    './data/china_provinces.geojson',                                   // 本地副本（首选）
+    'https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json',     // 远程兜底
+  ];
+  for (const url of sources) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.warn(`[chinahist] 省界底板 ${url} 拉取失败（HTTP ${res.status}），尝试下一个来源`);
+        continue;
+      }
+      gj = await res.json();
+      if (gj?.features?.length) break;
+      gj = null;
+    } catch (e) {
+      console.warn(`[chinahist] 省界底板 ${url} 加载失败：${e.message}`);
     }
-  } catch (e) {
-    console.warn('[chinahist] 当代省界底板加载失败（可选）：', e.message);
   }
+  if (!gj) {
+    // 极端情况（本地副本被误删且远程不可用）：明确报错，而不是静默空白
+    console.error('[chinahist] 省界底板全部来源失败 → 历史疆域/政权疆域无法生成（请确认 public/data/china_provinces.geojson 存在）');
+    return;
+  }
+  chinaProvinces = gj.features || [];
+  console.info(`[chinahist] 已加载当代省界底板 ${chinaProvinces.length} 个要素`);
+  clearTerritoryCache(); // 省界到位后必须清缓存，否则疆域沿用"无数据"时空结果
+  if (mode === 'chinaHist') updateLayers();
 }
 
 // 先秦真实几何：夏（Xia）/ 西周（Zhoa）取自 historical-basemaps 年代快照（CC BY-SA 4.0），

@@ -281,9 +281,13 @@ export function buildChinaHistBaseLayers(opts) {
   if (!acts.length) return [];
   const ctx = geomCtx(opts);
   const feats = [];
+  const outlineFeats = [];
   for (const p of acts) {
     const geo = buildPolityGeometries(p, p.seg, ctx);
-    const a = alphaFor(p.start, p.end, year, 45);
+    // 底图不透明度 45 → 90：45 时在「地形晕渲」底图上几乎看不出来，
+    // 用户关掉「政权疆域」只看「历史疆域」会以为这一层坏了（实际是太淡）。
+    // 政权层（105）开着时本层不绘制，所以提亮不会出现两层叠深。
+    const a = alphaFor(p.start, p.end, year, 90);
     for (const f of geo.features) {
       feats.push({
         type: 'Feature',
@@ -291,9 +295,18 @@ export function buildChinaHistBaseLayers(opts) {
         geometry: f.geometry,
       });
     }
+    // 外轮廓：底图没有边界线时只是一片"色雾"，看不出王朝版图形状。
+    // 填充层仍旧 stroked:false（避免逐省描边画出内部省界），轮廓单独成层。
+    for (const f of geo.outline || []) {
+      outlineFeats.push({
+        type: 'Feature',
+        properties: { polityId: p.id, color: p.color },
+        geometry: f.geometry,
+      });
+    }
   }
   if (!feats.length) return [];
-  return [
+  const layers = [
     new GeoJsonLayer({
       id: 'chinahist-base',
       data: { type: 'FeatureCollection', features: feats },
@@ -306,4 +319,22 @@ export function buildChinaHistBaseLayers(opts) {
       pickable: false,
     }),
   ];
+  if (outlineFeats.length) {
+    layers.push(
+      new GeoJsonLayer({
+        id: 'chinahist-base-outline',
+        data: { type: 'FeatureCollection', features: outlineFeats },
+        stroked: true,
+        filled: false,
+        getLineColor: (f) => {
+          const c = shade(f.properties.color);
+          return [c[0], c[1], c[2], 220];
+        },
+        getLineWidth: 2.2,
+        lineWidthMinPixels: 1.5,
+        pickable: false,
+      })
+    );
+  }
+  return layers;
 }

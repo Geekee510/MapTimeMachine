@@ -4,6 +4,8 @@ dist/
 .vite/
 # 校验用的一次性构建输出（vite --outDir .verify-dist）
 .verify-dist/
+# 本地无头浏览器验收（截图 / CDP 脚本 / 旧构建备份），不入库
+.verify/
 
 # 本地工作流 / 缓存（非项目交付物）
 .workbuddy/
