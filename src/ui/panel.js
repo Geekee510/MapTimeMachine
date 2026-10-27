@@ -71,7 +71,7 @@ export function flagOf(enName) {
   return FLAGS[base] || '';
 }
 
-export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
+export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onWarList, onExitWar, onReplayWar }) {
   const tTerritory = document.getElementById('toggle-territory');
   const tOutline = document.getElementById('toggle-outline');
   const tRegion = document.getElementById('toggle-region');
@@ -84,10 +84,21 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   const tLake = document.getElementById('toggle-lake');
   const tBasemap = document.getElementById('toggle-basemap');
   const tZh = document.getElementById('toggle-zh');
+  const tPolity = document.getElementById('toggle-polity');
+  const tProvince = document.getElementById('toggle-province');
+  const tPass = document.getElementById('toggle-pass');
+  const tCity = document.getElementById('toggle-city');
   const resetBtn = document.getElementById('reset-view');
   const info = document.getElementById('info');
   const infoClose = document.getElementById('info-close');
   const infoEvents = document.getElementById('info-events');
+  const btnHelp = document.getElementById('btn-help');
+  const panelHelp = document.getElementById('panel-help');
+  const warPlaying = document.getElementById('war-playing');
+  const warPlayingName = document.getElementById('war-playing-name');
+  const warPlayingExit = document.getElementById('war-playing-exit');
+  const warPlayingReplay = document.getElementById('war-playing-replay');
+  const panelWar = document.getElementById('panel-war');
 
   let lastProps = null; // 当前展示的对象（国家 or 山脉），用于年份/语言变化时刷新
 
@@ -101,6 +112,30 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
   tLake.addEventListener('change', () => onToggleLayer('lake', tLake.checked));
   tBasemap.addEventListener('change', () => onToggleLayer('basemapLand', tBasemap.checked));
   tZh.addEventListener('change', () => onToggleLayer('zh', tZh.checked));
+  tPolity?.addEventListener('change', () => onToggleLayer('polity', tPolity.checked));
+  tProvince?.addEventListener('change', () => onToggleLayer('provinceRef', tProvince.checked));
+  tPass?.addEventListener('change', () => onToggleLayer('pass', tPass.checked));
+  tCity?.addEventListener('change', () => onToggleLayer('city', tCity.checked));
+  // 「!」圆圈：把原先面板底部的数据来源说明收进弹层（面板本身保持干净）
+  btnHelp?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!panelHelp) return;
+    panelHelp.classList.toggle('hidden');
+    btnHelp.classList.toggle('active', !panelHelp.classList.contains('hidden'));
+  });
+  document.addEventListener('click', (e) => {
+    if (!panelHelp || panelHelp.classList.contains('hidden')) return;
+    if (panelHelp.contains(e.target) || btnHelp?.contains(e.target)) return;
+    panelHelp.classList.add('hidden');
+    btnHelp?.classList.remove('active');
+  });
+  warPlayingExit?.addEventListener('click', () => { if (onExitWar) onExitWar(); });
+  warPlayingReplay?.addEventListener('click', () => { if (onReplayWar) onReplayWar(); });
+  // 第三幅图：战争列表页入口（独立"战争"面板，仅中国古代史模式显示）
+  const btnWarList = document.getElementById('btn-war-list');
+  btnWarList?.addEventListener('click', () => {
+    if (onWarList) onWarList();
+  });
   resetBtn.addEventListener('click', onReset);
   const closeInfo = () => {
     info.classList.add('hidden');
@@ -287,6 +322,34 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     // 连分隔线一起收起，避免面板出现一条空线。
     setMode(m) {
       if (groupChina) groupChina.style.display = m === 'china' ? '' : 'none';
+      const groupHist = document.getElementById('group-chinahist');
+      if (groupHist) groupHist.style.display = m === 'chinaHist' ? '' : 'none';
+      // 战争卡独立成块：只有中国古代史模式需要（其他模式整块隐藏）
+      if (panelWar) panelWar.classList.toggle('hidden', m !== 'chinaHist');
+    },
+    // 由 main.setMode 在切换模式后调用：把图层默认同步到面板勾选框
+    syncCheckboxes(state) {
+      const map = {
+        territory: tTerritory, outline: tOutline, region: tRegion, river: tRiver,
+        riverLabel: tRiverLabel, mountain: tMountain, relief: tRelief, lake: tLake,
+        basemapLand: tBasemap, zh: tZh, polity: tPolity, provinceRef: tProvince,
+        pass: tPass, city: tCity,
+      };
+      for (const k in map) {
+        const el = map[k];
+        if (el && state[k] !== undefined) el.checked = !!state[k];
+      }
+    },
+    // 战争回放状态条（传入 null 表示未在回放）
+    setWarPlaying(title) {
+      if (!warPlaying) return;
+      if (!title) {
+        warPlaying.classList.add('hidden');
+        if (warPlayingName) warPlayingName.textContent = '';
+        return;
+      }
+      if (warPlayingName) warPlayingName.textContent = title;
+      warPlaying.classList.remove('hidden');
     },
     showInfo(props) {
       lastProps = props;
@@ -376,6 +439,72 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName }) {
     rerender() {
       // 守卫：卡片处于关闭状态（如模式切换后）时不得借刷新重新弹出
       if (lastProps && !info.classList.contains('hidden')) render(lastProps);
+    },
+    // 第三模式「中国古代史」：关隘 / 城市 / 战役 通用信息卡
+    // p 由 features.js 的 passCard/cityCard/battleCard 归一化：{name, kind, desc, lines:[[k,v]...]}
+    showPlace(p) {
+      if (!p) {
+        info.classList.add('hidden');
+        hideEvents();
+        lastProps = null;
+        return;
+      }
+      lastProps = null; // 静态卡：不参与世界模式 rerender
+      const nameEl = document.getElementById('info-name');
+      const body = document.getElementById('info-body');
+      nameEl.textContent = p.kind ? `${p.name}（${p.kind}）` : p.name;
+      const rows = [];
+      for (const [k, v] of p.lines || []) {
+        if (v) rows.push(`<div><span class="k">${k}：</span>${v}</div>`);
+      }
+      if (p.desc) rows.push(`<div><span class="k">简介：</span>${p.desc}</div>`);
+      body.innerHTML = rows.join('');
+      info.classList.remove('hidden');
+      hideEvents();
+    },
+    // 第三模式「中国古代史」：政权信息卡（存续/都城/类型/简介/重大事件）
+    showPolity(p) {
+      if (!p) {
+        info.classList.add('hidden');
+        hideEvents();
+        lastProps = null;
+        return;
+      }
+      const fy = (y) => (y < 0 ? `前${-y}` : `${y}`);
+      lastProps = null; // 政权卡不参与世界模式的 rerender
+      const nameEl = document.getElementById('info-name');
+      const body = document.getElementById('info-body');
+      nameEl.textContent = `${p.name}（${p.typeLabel}）`;
+      const span = `${fy(p.start)} – ${fy(p.end)}`;
+      const rows = [
+        `<div><span class="k">存续：</span>${span}</div>`,
+        `<div><span class="k">都城：</span>${p.capital}</div>`,
+        `<div><span class="k">类型：</span><span class="status-tag" style="background:${p.type === 'central' ? '#b2543a' : '#5c6c94'}">${p.typeLabel}</span></div>`,
+        `<div><span class="k">简介：</span>${p.desc}</div>`,
+      ];
+      body.innerHTML = rows.join('');
+      info.classList.remove('hidden');
+      if (infoEvents) {
+        const evs = (p.events || []).slice().sort((a, b) => a.year - b.year);
+        if (evs.length) {
+          const items = evs
+            .map(
+              (e) =>
+                `<li><span class="ev-year">${fy(e.year)}</span>` +
+                `<span class="ev-main"><span class="ev-title">${e.title}</span>` +
+                (e.desc ? `<span class="ev-desc">${e.desc}</span>` : '') +
+                `</span></li>`
+            )
+            .join('');
+          infoEvents.innerHTML =
+            `<div class="ev-head">📜 ${p.name} · 重大事件<br/>` +
+            `<span class="ev-sub">共 ${evs.length} 条</span></div>` +
+            `<ul class="ev-list">${items}</ul>`;
+          infoEvents.classList.remove('hidden');
+        } else {
+          hideEvents();
+        }
+      }
     },
   };
 }

@@ -2,14 +2,39 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './style.css'; // 关键修复：此前样式从未被引入，导致 #map 高度为 0（地图不可见）、.hidden 失效（加载提示永不消失）
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { GeoJsonLayer, LineLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { loadCShapes } from './data/loaders.js';
 import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.js';
 import { polityDesc, fallbackDesc, regionOf } from './data/polity-desc.js';
 import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
+import { dissolveFeatures } from './lib/geo.js';
+import { clearTerritoryCache } from './modes/chinaHist/territoryGen.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
 import { createPanel } from './ui/panel.js';
+import {
+  buildChinaHistLayers,
+  buildChinaHistBaseLayers,
+  getChinaHistYearEvents,
+  getPolityInfo,
+  CHINA_HIST_MIN,
+  CHINA_HIST_MAX,
+} from './modes/chinaHist/index.js';
+import {
+  passPins,
+  warPins,
+  buildCityLayers,
+  buildWarLayers,
+  passCard,
+  cityCard,
+  battleCard,
+  warCard,
+} from './modes/chinaHist/features.js';
+import { warById, warView, WARS } from './modes/chinaHist/wars.js';
+import { PASSES } from './modes/chinaHist/passes.js';
+import { CITIES } from './modes/chinaHist/cities.js';
+import { createWarList } from './ui/warList.js';
+import { createPinLayer } from './ui/pinLayer.js';
 
 const YEAR_MIN = -3000; // 世界模式下限：公元前 3000 年（此前为史前考古文化，不做政治疆域）
 const YEAR_MAX = 2023;
@@ -36,6 +61,18 @@ const WORLD_ZOOM = 1.4;
 const CHINA_CENTER = [104, 36]; // 中国大致中心（华北/中原一带）
 const CHINA_ZOOM = 3.6;
 
+// 每幅地图自己的"本位视图"（复位视图 + 切模式进入时都用它）。
+// 之前三幅图都共用 WORLD_CENTER/WORLD_ZOOM：在中国疆域或中国古代史里点"复位视图"
+// 会一路缩到全球，等于把当前这幅图的视角丢掉。现在按图区分：
+//   世界地图    → 全球（z1.4）
+//   中国疆域    → 全国（z3.6，含新疆/西藏/台湾）
+//   中国古代史  → 中原—关中的"历史核心区"（z4.0，长安/洛阳/开封一带）
+const MODE_VIEW = {
+  world:     { center: WORLD_CENTER, zoom: WORLD_ZOOM, pitch: 0, bearing: 0 },
+  china:     { center: CHINA_CENTER, zoom: CHINA_ZOOM, pitch: 0, bearing: 0 },
+  chinaHist: { center: [108.6, 34.4], zoom: 4.0, pitch: 0, bearing: 0 },
+};
+
 let currentYear = 1960;
 let territories = [];
 let rivers = null; // 可选：Natural Earth 河流 GeoJSON
@@ -45,13 +82,45 @@ let deckOverlay = null;
 let map = null;
 let panel = null;
 let timeline = null; // 时间轴控件引用
-const layersState = { territory: true, outline: true, region: true, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false };
+
+// —— 第三模式「战争」军队演进动画状态 ——
+// 回放进度用 0..1 归一化，而不是"年份"。年份驱动会有两个副作用：
+//   ① 史料跨度只有 1~2 个月的战争（数据里写成 0.05 年）演得极快；
+//   ② 旧版给跨度加了 0.12 年兜底，行进终点因此超出 meta.end，时间轴先到头，
+//      军队只走到 42%~52% 就停住 —— 也就是"动画到一半就停了"。
+let warProgress = null;    // 战争回放进度（0..1，null=不在回放）
+let warRaf = null;         // requestAnimationFrame 句柄
+let histStaticLayers = []; // chinaHist 静态图层缓存（战争层逐帧叠在其上，避免整层重建）
+let lastWarTs = 0;
+let warHoldAcc = 0;        // 一场战争演完后在终点停留的累计秒数
+let focusWarId = null;     // 战争列表页'选中某场战争'时的单独回放目标（null=不回放）
+let selectedPassId = null; // 当前选中的关隘（地图上显示选中态）
+let warList = null;        // 战争列表页实例
+let pinLayer = null;       // 关隘/交战点图钉层（MapLibre Marker 池）
+const WAR_SECONDS = 16;    // 一场战争演进动画的时长（秒，放慢便于看清路线）
+const WAR_END_HOLD = 2.6;  // 演完在终点停留（秒）后再循环
+const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true };
+
+// 各模式进入时的图层默认（切到该模式即套用，并同步面板勾选）。
+// 中国古代史默认：历史疆域 / 主要河流 / 地形渲染 / 中文标签 / 政权疆域 / 当代省界 /
+// 关隘 / 城市 开，其余关。关隘与城市是这个模式的主内容（可点击看背景），所以默认开。
+const MODE_LAYER_DEFAULTS = {
+  world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true },
+  china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true },
+  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: true,  city: true,  zh: true },
+};
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
 let chinaDynasties = null; // china_dynasties.geojson 的 features 数组（省界拼接的疆域底图）
 let chinaOutlines = null; // china_outline.geojson：historical-basemaps 提取的王朝疆域轮廓（更接近史实）
 let chinaRegions = null; // china_regions.geojson：CHGIS 历代政区界（州/郡/府/路），叠在疆域之上
+let chinaProvinces = null; // 当代省级地图底板（DataV GeoJSON，运行时拉取，仅作浅色参考线，无交互）
+let chinaProvincesLoaded = false; // 是否已触发过省界加载（懒加载，仅一次）
+let chinaPreqin = null; // china_preqin.geojson：夏/西周的真实几何（historical-basemaps，CC BY-SA）
+let chinaPreqinLoaded = false; // 是否已触发过先秦几何加载（懒加载，仅一次）
 let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
+let histInfoOpen = false; // 第三模式（中国古代史）信息卡是否打开
+let histLastPolityId = null; // 当前展示的政权 id（年份拖动时刷新该卡）
 
 // 底图陆地显隐：CShapes 疆域数据不含小岛屿，底图(demotiles)却会画出
 // 大量沿岸小岛 → 海面上出现"白色小点"。默认把底图陆地沉入海色，
@@ -494,6 +563,8 @@ function buildMountainLayers() {
 }
 
 // 湖泊：蓝色半透明面 + 细边
+// 透明度比早先略高（130→160）：洞庭、鄱阳这类湖在疆域填充之上若太淡，只剩一片
+// 灰蓝，和"没有这个湖"几乎一样。填充重一点，湖泊才读得出来是水面。
 function buildLakeLayer() {
   if (!lakes) return null;
   return new GeoJsonLayer({
@@ -501,8 +572,8 @@ function buildLakeLayer() {
     data: lakes,
     stroked: true,
     filled: true,
-    getFillColor: [70, 130, 200, 130],
-    getLineColor: [40, 90, 160, 180],
+    getFillColor: [70, 130, 200, 160],
+    getLineColor: [40, 90, 160, 200],
     getLineWidth: 0.5,
     lineWidthMinPixels: 0.3,
     pickable: false,
@@ -638,6 +709,19 @@ function computeLabelChars() {
     if (d.states) for (const s of d.states) { add(s.name); add(s.capital); } // 并立政权名/都城
   }
   for (const v of HB_ZH_VALUES) add(v); // 1886 年前的历史政权译名（如"阿拔斯王朝"）
+  // 第三幅图的关隘/城市/战争文本：不在字符集里会渲染成豆腐块（此前关隘名偶发缺字）
+  for (const p of PASSES) add(p.name);
+  // 城市名会随年份变（长安/大兴/西安），**所有别名都必须进字符集**，
+  // 否则某个朝代切换到没登记过的名字就会渲染成豆腐块。
+  for (const c of CITIES) {
+    add(c.name);
+    for (const [, nm] of c.n || []) add(nm);
+  }
+  for (const w of WARS) {
+    add(w.meta.title);
+    for (const pt of w.parties || []) { add(pt.short); add(pt.name); }
+    for (const b of w.battles || []) add(b.name);
+  }
   labelChars = [...s];
   detectMaxAtlasHeight();
   labelFontSettings = pickFontSettings(s.size);
@@ -738,20 +822,60 @@ function buildChinaTerritoryLayer() {
 //   · 中华人民共和国：该轮廓缺台湾、西藏等，实心覆盖反而掩盖了我们省界清单里的完整版图。
 // 现在只作为"史实边界参考线"（红色细线）叠在疆域之上，既不遮挡分色也不缺块。
 // 每个朝代可能有多个年代的轮廓（如清有 1700/1783/1800），取年份最接近当前年份的那个。
-// 注意：**中华人民共和国没有轮廓数据**——HB 的 1960 China 多边形缺西藏/台湾/海南
-// （已在 gen-china-outline.mjs 中剔除），此函数对该朝代返回 null，不画参考线；
-// 现代中国疆域一律以省界拼接层为准（该层含台湾、西藏、海南及南海诸岛）。
+// 注意：**中华人民共和国没有 HB 轮廓数据**——HB 的 1960 China 多边形缺西藏/台湾/海南
+// （已在 gen-china-outline.mjs 中剔除），这类朝代改由下面的 dissolve 外轮廓兜底，
+// 现代中国疆域仍以省界拼接层为准（该层含台湾、西藏、海南及南海诸岛）。
+//
+// dissolve 解出的外轮廓缓存：key = 朝代id + 当年生效的政权切片签名。
+// dissolve 一次约 30~60ms，拖动年份时不能每帧重算；只在切换政权切片时变。
+const _outlineDissolveCache = new Map();
+
+// 从省界拼接层 dissolve 出「外轮廓」——用于**没有 HB 史实轮廓**的朝代。
+// 原理：同一朝代各要素里，两省共享的边出现 2 次（内部边，丢弃），
+// 只属于一省的边出现 1 次（海岸线/国界/朝代边缘，保留）→ 首尾相连即外轮廓。
+// 这样 22 个朝代的「史实边界参考线」开关都能出线，不再有 15 个朝代是空白。
+function buildDissolveOutline(d) {
+  if (!chinaDynasties) return null;
+  const feats = chinaDynasties.filter(
+    (f) => f.properties.id === d.id
+      && (f.properties.sStart == null
+        || (currentYear >= f.properties.sStart && currentYear <= f.properties.sEnd))
+  );
+  if (!feats.length) return null;
+  const sig = d.id + '|' + feats.map((f) => `${f.properties.state || ''}@${f.properties.sStart ?? ''}`).join(',');
+  let cached = _outlineDissolveCache.get(sig);
+  if (!cached) {
+    const rings = dissolveFeatures(feats, 5);
+    cached = rings.map((r) => ({
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Polygon', coordinates: [r] },
+    }));
+    _outlineDissolveCache.set(sig, cached);
+  }
+  if (!cached.length) return null;
+  return { type: 'FeatureCollection', features: cached };
+}
+
 function buildChinaOutlineLayer() {
   const d = getDynastyAtYear(currentYear);
-  if (!d || !chinaOutlines || !chinaOutlines.length) return null;
-  const cands = chinaOutlines.filter((f) => f.properties.dynasty === d.id);
-  if (!cands.length) return null;
-  const best = cands.reduce((a, b) =>
-    Math.abs(b.properties.year - currentYear) < Math.abs(a.properties.year - currentYear) ? b : a
-  );
+  if (!d) return null;
+  // 优先用 historical-basemaps 的史实王朝轮廓（按历史疆域绘制，形状更接近史实）；
+  // 该朝代没有 HB 轮廓时，退回用省界拼接层 dissolve 出的外轮廓。
+  const cands = (chinaOutlines || []).filter((f) => f.properties.dynasty === d.id);
+  let data = null;
+  if (cands.length) {
+    const best = cands.reduce((a, b) =>
+      Math.abs(b.properties.year - currentYear) < Math.abs(a.properties.year - currentYear) ? b : a
+    );
+    data = { type: 'FeatureCollection', features: [best] };
+  } else {
+    data = buildDissolveOutline(d);
+  }
+  if (!data) return null;
   return new GeoJsonLayer({
     id: 'china-outline',
-    data: { type: 'FeatureCollection', features: [best] },
+    data,
     stroked: true,
     filled: false, // 关键：不再用第二个实心多边形覆盖疆域层
     // 配色：先试过深褐 [90,30,18]、深靛紫 [96,58,142]，与砖红填充相比
@@ -928,6 +1052,137 @@ function buildChinaCapitalLayer() {
   return layers;
 }
 
+// 停止战争动画循环
+function stopWarAnim() {
+  if (warRaf) {
+    cancelAnimationFrame(warRaf);
+    warRaf = null;
+  }
+}
+
+// 确保战争动画循环在运行：仅当处于 chinaHist、正回放某场战争（focusWarId）。
+// 每帧只重建战争图层（路线/箭头/队头），静态图层复用缓存，避免全量重绘。
+function ensureWarAnim() {
+  if (!(mode === 'chinaHist' && focusWarId && deckOverlay)) {
+    stopWarAnim();
+    return;
+  }
+  if (warRaf) return;
+  lastWarTs = performance.now();
+  const tick = (ts) => {
+    if (mode !== 'chinaHist' || !focusWarId) {
+      warRaf = null;
+      return;
+    }
+    const dt = Math.min(0.1, (ts - lastWarTs) / 1000); // 限幅，防切回时跳帧
+    lastWarTs = ts;
+    if (warProgress >= 1) {
+      // 演完先停留一会儿（让人看清终局的对阵与地名），再从头循环
+      warHoldAcc += dt;
+      if (warHoldAcc >= WAR_END_HOLD) {
+        warHoldAcc = 0;
+        warProgress = 0;
+      }
+    } else {
+      warProgress = Math.min(1, (warProgress ?? 0) + dt / WAR_SECONDS);
+    }
+    const warLayers = buildWarLayers(currentYear, warProgress, {
+      labelChars,
+      labelFontSettings,
+      labelFontFamily: LABEL_FONT_FAMILY,
+      focusWarId,
+    });
+    deckOverlay.setProps({ layers: [...histStaticLayers, ...warLayers] });
+    syncPins(); // 三角箭头图钉跟着进度走（DOM Marker，不占 deck 图层）
+    warRaf = requestAnimationFrame(tick);
+  };
+  warRaf = requestAnimationFrame(tick);
+}
+
+// 重播：进度归零，动画循环若已停则重新拉起
+function replayWar() {
+  if (!focusWarId) return;
+  warProgress = 0;
+  warHoldAcc = 0;
+  updateLayers(); // 重绘到起点，并确保动画循环在跑
+}
+
+// 结束战争回放（回到"只看疆域"的状态）：图层、图钉、列表高亮、状态条一并清掉
+// 注意：**即使 focusWarId 已经是 null 也要清面板/列表**。此前函数开头有
+// `if (!focusWarId) return;`，一旦回放被别处提前取消（如年份守卫），面板还停在
+// "回放中 + 重播/退出"，而按钮点下去因为 focusWarId 为空直接返回 —— 就是"退出失灵"。
+function exitWar() {
+  focusWarId = null;
+  warProgress = null;
+  warHoldAcc = 0;
+  stopWarAnim();
+  warList?.setActive(null);
+  panel?.setWarPlaying?.(null);
+  updateLayers();
+}
+
+// 战争列表页选中某场战争 → 跳到该年、聚焦战区、单独回放该场
+// （军队演进动画由 ensureWarAnim 驱动；focusWarId 让当年只演这一场）
+function jumpToWar(warId) {
+  const w = warById(warId);
+  if (!w) return;
+  if (mode !== 'chinaHist') setMode('chinaHist');
+  focusWarId = w.id;
+  // 年份必须夹在时间轴范围内：setRange → setYear 会自己做一次夹取，
+  // 若这里传的范围外年份（如涿鹿 前2600 而时间轴本来从前2070 起），
+  // onYear 收到的是被夹过的年份，与战争窗口对不上，回放会被立刻结束。
+  // 取整用 trunc 而不是 round：数据里的 -1046.05 / 1645.5 是"某年内的时点"，
+  // 小数只是年内位置，截掉即该年（round 会把 1645.5 显示成 1646）。
+  const rawY = Math.trunc(w.meta.start);
+  const y = Math.min(CHINA_HIST_MAX, Math.max(CHINA_HIST_MIN, rawY));
+  currentYear = y;
+  warProgress = 0;
+  warHoldAcc = 0;
+  // setRange 内部会触发 onYear → updateLayers（顺带刷新年份大字与时间轴滑块）
+  if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, y);
+  stopWarAnim();
+  updateLayers();
+  const v = warView(w);
+  if (map) map.flyTo({ center: v.center, zoom: v.zoom, duration: 1100 });
+  if (panel) {
+    panel.showPlace(warCard(w)); // 顺手把这场战争的背景卡摊开
+    panel.setWarPlaying(w.meta.title); // 战争面板显示"回放中 + 重播/退出"
+  }
+  warList?.setActive(w.id);
+  warList?.close();
+}
+
+// 图钉同步：关隘（静态）+ 战争三角箭头/交战图标（随动画进度移动）。
+// 静态图层重建与动画逐帧都走这一个入口 —— 逐帧只动箭头的位置与朝向，
+// deck 侧也只重建两条路线图层，代价很小。
+function syncPins() {
+  if (!pinLayer) return;
+  if (mode !== 'chinaHist') {
+    pinLayer.clear();
+    return;
+  }
+  const pins = [];
+  if (layersState.pass) {
+    // 关隘按年份筛选：早于设置年不出现、废弃后消失（见 passes.js）
+    pins.push(...passPins({ year: currentYear, selectedId: selectedPassId }));
+  }
+  if (focusWarId) pins.push(...warPins(currentYear, warProgress ?? 0, { focusWarId }));
+  pinLayer.sync(pins, {
+    onClick: (pin) => {
+      if (pin.kind === 'pass') {
+        selectedPassId = pin.payload.id;
+        if (panel) panel.showPlace(passCard(pin.payload, currentYear));
+        updateLayers(); // 重绘以显示选中态
+      } else if (pin.kind === 'clash' || pin.kind === 'battle') {
+        if (panel) panel.showPlace(battleCard(pin.payload)); // 交战点 → 整场战争的背景卡
+      } else if (pin.kind === 'rider' || pin.kind === 'tri') {
+        const w = warById(pin.payload?.warId);
+        if (w && panel) panel.showPlace(warCard(w));
+      }
+    },
+  });
+}
+
 function updateLayers() {
   if (!deckOverlay) return;
   const layers = [];
@@ -968,6 +1223,89 @@ function updateLayers() {
       if (l) layers.push(l);
     }
     deckOverlay.setProps({ layers });
+    return;
+  }
+  // 第三模式：中国古代史（汉/唐/明 + 三国/南北朝/五代十国）
+  if (mode === 'chinaHist') {
+    // 历史疆域（中央王朝底图，轻量无交互）：
+    // 「政权疆域」已覆盖全部政权（含中央王朝），两层同时开会把填充叠两遍 → 颜色变深、
+    // 下面的省界线又看不清。故政权层开启时不再画这层底图，只在其关闭时兜底。
+    if (layersState.territory && !layersState.polity) {
+      const base = buildChinaHistBaseLayers({ year: currentYear, chinaProvinces, chinaPreqin });
+      if (base && base.length) layers.push(...base);
+    }
+    if (layersState.polity) {
+      const hist = buildChinaHistLayers({
+        year: currentYear,
+        chinaProvinces,
+        chinaPreqin,
+        labelChars,
+        labelFontSettings,
+        labelFontFamily: LABEL_FONT_FAMILY,
+        onPolityPick: (id) => {
+          histLastPolityId = id;
+          histInfoOpen = true;
+          if (panel) panel.showPolity(getPolityInfo(id, currentYear, { chinaProvinces, chinaPreqin }));
+        },
+      });
+      layers.push(...hist);
+    }
+    // 公共底图（河流 / 河流名 / 山脉 / 湖泊）——**必须排在疆域填充之后**。
+    // deck.gl 按数组顺序叠放，先入的在下层；此前这一段写在疆域之前，河流与湖泊被
+    // 半透明政权填充整片盖住，只剩一点灰蓝色，洞庭湖、淮河几乎分辨不出来。
+    // 与中国疆域模式的顺序保持一致（那边一直是先疆域后水系）。
+    if (layersState.river && rivers) {
+      const l = buildRiverLineLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.riverLabel && rivers) {
+      const l = buildRiverLabelLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.mountain && mountains) layers.push(...buildMountainLayers());
+    if (layersState.lake && lakes) {
+      const l = buildLakeLayer();
+      if (l) layers.push(l);
+    }
+    // 当代省界（参考线，仅虚线不填充）：画在疆域之上，否则会被填充盖暗；
+    // 虚线由 LineLayer 逐段画（deck 没有 dash 扩展，30 个省界拆成短段更可控）
+    if (layersState.provinceRef) {
+      const pr = buildChinaProvinceRefLayer();
+      if (pr) layers.push(pr);
+    }
+    // 关隘 / 行军三角箭头 / 交战点：走图钉层（DOM Marker，见 ui/pinLayer.js），不参与 deck 图层
+    syncPins();
+    // 城市 / 治所（独立图层，可点击看简介；城名随年份变化，按 rank+zoom 分级显示）
+    if (layersState.city) {
+      layers.push(
+        ...buildCityLayers({
+          year: currentYear,
+          zoom: map ? map.getZoom() : 4,
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          onPick: (c) => { if (panel) panel.showPlace(cityCard(c, currentYear)); },
+        })
+      );
+    }
+    // 战争演进：只有在战争列表里选中某一场时才播放（focusWarId），
+    // 静态层先缓存，战争层（路线 + 军队名）由动画循环逐帧追加
+    histStaticLayers = layers.slice();
+    if (focusWarId) {
+      if (warProgress == null) warProgress = 0;
+      layers.push(
+        ...buildWarLayers(currentYear, warProgress, {
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          focusWarId,
+        })
+      );
+    } else {
+      warProgress = null;
+    }
+    deckOverlay.setProps({ layers });
+    ensureWarAnim();
     return;
   }
   // 世界模式
@@ -1050,11 +1388,48 @@ const FALLBACK_STYLE = {
   layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#0d1b2a' } }],
 };
 
+// —— 中国水系补充集（scripts/gen-china-hydro.mjs 生成，NE 1:10m 裁切）——
+// 底图的河流/湖泊来自 Natural Earth 1:50m，那个级别对中国内部删减很多：
+// 河流只剩黄河/长江/珠江/黑龙江等干流（**淮河整条没有**），湖泊收了鄱阳/太湖/洪泽/
+// 巢湖/呼伦却**独独漏掉洞庭湖**。这里是 1:10m 裁出来的补充集，只补 50m 缺的那部分：
+// 同名以 50m 为准（否则黄河、长江会被画两遍、颜色叠加变深）。
+let hydroExtraPromise = null;
+function loadHydroExtra() {
+  if (!hydroExtraPromise) {
+    hydroExtraPromise = fetch('./data/china_hydro.geojson')
+      .then((r) => (r.ok ? r.json() : null))
+      .catch((e) => {
+        console.warn('[hydro] 水系补充集加载失败（可运行 node scripts/gen-china-hydro.mjs）：', e.message);
+        return null;
+      });
+  }
+  return hydroExtraPromise;
+}
+
+function mergeHydro(gj, kind) {
+  const target = kind === 'river' ? rivers : lakes;
+  if (!gj || !gj.features?.length || !target?.features) return;
+  const have = new Set(
+    target.features.map((f) => (f.properties?.name || '').trim().toLowerCase()).filter(Boolean)
+  );
+  let added = 0;
+  for (const f of gj.features) {
+    if (f.properties?.kind !== kind) continue;
+    const key = (f.properties.name || '').trim().toLowerCase();
+    if (!key || have.has(key)) continue;
+    have.add(key);
+    target.features.push(f);
+    added++;
+  }
+  if (added) console.info(`[hydro] 补充 ${added} 个${kind === 'river' ? '河段' : '湖泊'}`);
+}
+
 async function loadRivers() {
   try {
     const res = await fetch('./data/ne_rivers.geojson');
     if (res.ok) {
       rivers = await res.json();
+      mergeHydro(await loadHydroExtra(), 'river');
       console.info(`[rivers] 已加载 ${rivers.features?.length || 0} 条河流`);
     } else {
       console.warn('[rivers] 未找到 ne_rivers.geojson（请运行 npm run fetch-data）');
@@ -1083,6 +1458,7 @@ async function loadLakes() {
     const res = await fetch('./data/ne_lakes.geojson');
     if (res.ok) {
       lakes = await res.json();
+      mergeHydro(await loadHydroExtra(), 'lake'); // 补上 50m 漏掉的洞庭湖
       console.info(`[lakes] 已加载 ${lakes.features?.length || 0} 个湖泊`);
     } else {
       console.warn('[lakes] 未找到 ne_lakes.geojson（请运行 npm run fetch-data）');
@@ -1140,8 +1516,117 @@ async function loadChinaRegions() {
   }
 }
 
+// 当代省级地图底板（仅中国古代史模式用作浅色无交互参考线）。
+// 数据来源：阿里 DataV.GeoAtlas 标准行政区划（公共地理边界，非受版权保护的专题地图描绘），
+// 运行时按需拉取，不随仓库分发（与 historical-basemaps 同源策略一致）。
+// 非阻断：网络不可用或拉取失败时静默跳过，不影响其他图层。
+async function loadChinaProvinces() {
+  try {
+    const res = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json');
+    if (res.ok) {
+      const gj = await res.json();
+      chinaProvinces = gj.features || [];
+      console.info(`[chinahist] 已加载当代省界底板 ${chinaProvinces.length} 个要素`);
+      clearTerritoryCache(); // 省界到位后必须清缓存，否则疆域沿用"无数据"时空结果
+      if (mode === 'chinaHist') updateLayers();
+    } else {
+      console.warn('[chinahist] 当代省界底板拉取失败（HTTP ' + res.status + '），参考线将不显示');
+    }
+  } catch (e) {
+    console.warn('[chinahist] 当代省界底板加载失败（可选）：', e.message);
+  }
+}
+
+// 先秦真实几何：夏（Xia）/ 西周（Zhoa）取自 historical-basemaps 年代快照（CC BY-SA 4.0），
+// 由 scripts/gen-china-preqin.mjs 生成。仅 2KB，第三幅图用于表达"无省界可依"的夏/西周疆域。
+async function loadChinaPreqin() {
+  try {
+    const res = await fetch('./data/china_preqin.geojson');
+    if (res.ok) {
+      const gj = await res.json();
+      chinaPreqin = gj.features || [];
+      console.info(`[chinahist] 已加载先秦真实几何 ${chinaPreqin.length} 个要素`);
+      clearTerritoryCache(); // 先秦几何到位后同理，让夏/西周的疆域重新生成
+      if (mode === 'chinaHist') updateLayers();
+    } else {
+      console.warn('[chinahist] 未找到 china_preqin.geojson（夏/西周疆域将不显示）');
+    }
+  } catch (e) {
+    console.warn('[chinahist] 先秦几何加载失败（可选）：', e.message);
+  }
+}
+
+// 当代省级界线：**不填充**（用户要求全透明），只按虚线画界线，且画在疆域填充之上，
+// 才不会被 41% 不透明度的疆域压暗。
+// deck.gl 本家没有虚线扩展（@deck.gl/extensions 未安装），这里先把每个省的边界环
+// 拆成等长的短线段（dash/gap 用经纬度度数计），再用 LineLayer 一次画完 ——
+// instanced 绘制，几千段也不掉帧；只在数据到位时算一次并缓存。
+const PROV_DASH = 0.16; // 每段虚线的长度（度，约 15km）
+const PROV_GAP = 0.11;  // 段间空隙
+let _provinceSegs = null;
+
+// 把一个环拆成虚线短段（沿原始顶点走，只在需要换相位时插值）
+function dashSegmentsOfRing(ring, out) {
+  let i = 0;
+  let cur = ring[0];
+  let drawing = true;
+  let remain = PROV_DASH;
+  while (i < ring.length - 1) {
+    const next = ring[i + 1];
+    const dx = next[0] - cur[0];
+    const dy = next[1] - cur[1];
+    const L = Math.hypot(dx, dy);
+    if (L < 1e-9) { i += 1; cur = next; continue; }
+    if (L <= remain) {
+      if (drawing) out.push({ source: cur, target: next });
+      remain -= L;
+      cur = next;
+      i += 1;
+      if (remain <= 1e-9) { drawing = !drawing; remain = drawing ? PROV_DASH : PROV_GAP; }
+    } else {
+      const t = remain / L;
+      const mid = [cur[0] + dx * t, cur[1] + dy * t];
+      if (drawing) out.push({ source: cur, target: mid });
+      drawing = !drawing;
+      cur = mid;
+      remain = drawing ? PROV_DASH : PROV_GAP;
+    }
+  }
+}
+
+function buildProvinceSegments(features) {
+  const out = [];
+  for (const f of features) {
+    const g = f.geometry;
+    if (!g) continue;
+    const rings = g.type === 'Polygon' ? g.coordinates
+      : g.type === 'MultiPolygon' ? g.coordinates.map((c) => c[0]) : [];
+    for (const r of rings) if (r && r.length > 2) dashSegmentsOfRing(r, out);
+  }
+  return out;
+}
+
+function buildChinaProvinceRefLayer() {
+  if (!chinaProvinces || !chinaProvinces.length) return null;
+  if (!_provinceSegs) _provinceSegs = buildProvinceSegments(chinaProvinces);
+  return new LineLayer({
+    id: 'chinahist-province',
+    data: _provinceSegs,
+    getSourcePosition: (d) => d.source,
+    getTargetPosition: (d) => d.target,
+    getColor: [120, 106, 92, 190],
+    getWidth: 1,
+    widthUnits: 'pixels',
+    widthMinPixels: 0.9,
+    pickable: false,
+  });
+}
+
 // 年份事件内容（供时间轴年份读数点击）：世界模式=世界大事，中国模式=朝代信息
 function getYearEvents(y) {
+  if (mode === 'chinaHist') {
+    return getChinaHistYearEvents(y);
+  }
   if (mode === 'china') {
     const d = getDynastyAtYear(y);
     if (!d) return { title: `📜 ${fmtYear(y)} · 暂无对应朝代`, items: [] };
@@ -1152,11 +1637,37 @@ function getYearEvents(y) {
   return { title: `🌍 ${fmtYear(y)} 年 · 世界大事`, items: getWorldEvents(y) };
 }
 
+// 复位视图：回到**当前这幅图**的本位视图（见 MODE_VIEW）。
+// 顺带把北向/俯仰角归零，避免拖拽旋转后复位仍带着歪斜的视角。
+function flyToModeView(m, duration = 800) {
+  if (!map) return;
+  const v = MODE_VIEW[m] || MODE_VIEW.world;
+  map.flyTo({ center: v.center, zoom: v.zoom, pitch: v.pitch, bearing: v.bearing, duration });
+}
+
+function resetView() {
+  flyToModeView(mode);
+}
+
 function setMode(m) {
   mode = m;
+  stopWarAnim(); // 切换模式时停止战争动画循环（离开 chinaHist 后不再逐帧重绘）
   document.getElementById('mode-world')?.classList.toggle('active', m === 'world');
   document.getElementById('mode-china')?.classList.toggle('active', m === 'china');
+  document.getElementById('mode-chinahist')?.classList.toggle('active', m === 'chinaHist');
+  const legendEl = document.getElementById('legend');
+  if (legendEl) legendEl.style.display = m === 'world' ? '' : 'none';
   chinaInfoOpen = false;
+  histInfoOpen = false;
+  histLastPolityId = null;
+  // 战争"单独回放"与关隘选中都是跨模式的状态，切模式时一并清掉，避免下次进来还锁着
+  focusWarId = null;
+  warProgress = null;
+  warHoldAcc = 0;
+  selectedPassId = null;
+  warList?.close();
+  pinLayer?.clear(); // 图钉是 DOM，不随 deck 图层自动消失，必须显式清
+  if (panel && panel.setWarPlaying) panel.setWarPlaying(null);
   // 关闭介绍卡：必须走 panel.hide() 清空内部 lastProps 状态。
   // 此前只直接给 DOM 加 hidden，lastProps 仍在，之后任意图层开关触发 rerender()
   // 会把上一模式的国家卡重新弹出来（世界点国家→切中国→取消历史疆域→弹框）。
@@ -1169,15 +1680,39 @@ function setMode(m) {
   }
   // 面板项随模式调整：「历代政区界」仅中国疆域模式有意义（世界模式隐藏该开关）
   if (panel && panel.setMode) panel.setMode(m);
+  // 套用该模式的图层默认，并同步面板勾选（首次进入中国古代史模式会切换成其专属默认）
+  const def = MODE_LAYER_DEFAULTS[m];
+  if (def) {
+    Object.keys(def).forEach((k) => { layersState[k] = def[k]; });
+    if (panel && panel.syncCheckboxes) panel.syncCheckboxes(layersState);
+    applyRelief();      // MapLibre 地形晕渲需随默认值重新生效
+    applyBasemapLand(); // 今地图开关同理
+  }
+  // 首次进入中国古代史模式时懒加载当代省界参考底图（非阻断：失败静默跳过）
+  if (m === 'chinaHist' && !chinaProvincesLoaded) {
+    chinaProvincesLoaded = true;
+    loadChinaProvinces();
+  }
+  // 先秦真实几何（夏/西周）：同样懒加载，仅第三幅图用
+  if (m === 'chinaHist' && !chinaPreqinLoaded) {
+    chinaPreqinLoaded = true;
+    loadChinaPreqin();
+  }
   if (m === 'china') {
     currentYear = CHINA_MIN;
     if (timeline) timeline.setRange(CHINA_MIN, CHINA_MAX, currentYear);
-    map?.flyTo({ center: CHINA_CENTER, zoom: CHINA_ZOOM, duration: 800 });
+    flyToModeView('china');
     // 中国模式：不自动弹出介绍卡（信息卡已随模式切换关闭），待用户点击某个政权/朝代再打开
+  } else if (m === 'chinaHist') {
+    // 默认落在西汉（统一王朝、疆域完整），而不是时间轴最左端的夏——
+    // 夏/商疆域为考古分布示意，作为首屏观感偏弱。
+    currentYear = -100;
+    if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, currentYear);
+    flyToModeView('chinaHist');
   } else {
     currentYear = 1960;
     if (timeline) timeline.setRange(YEAR_MIN, YEAR_MAX, currentYear);
-    map?.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 });
+    flyToModeView('world');
   }
   updateYearLabel();
   updateLayers();
@@ -1207,6 +1742,16 @@ async function init() {
       attributionControl: true,
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+    pinLayer = createPinLayer(map);
+    // 只读调试句柄（自动化验收/排障用）：读当前模式与相机，不提供任何写操作。
+    window.__mtmView = () => ({
+      mode,
+      year: currentYear,
+      center: map.getCenter().toArray(),
+      zoom: map.getZoom(),
+      pitch: map.getPitch(),
+      bearing: map.getBearing(),
+    });
 
     // 关键修复：覆盖层立即挂载，不依赖底图是否加载成功
     let overlayAdded = false;
@@ -1245,6 +1790,24 @@ async function init() {
         if (mode === 'china') {
           // 中国模式：拖动年份时若信息卡打开，则刷新为该年所属朝代
           if (chinaInfoOpen && panel) panel.showChinaInfo(getDynastyAtYear(y), undefined, y);
+        } else if (mode === 'chinaHist') {
+          // 第三模式：年份拖动时若政权卡打开，刷新该政权（已不存续则关闭）
+          if (histInfoOpen && panel) {
+            const p = histLastPolityId ? getPolityInfo(histLastPolityId, y) : null;
+            if (p && p.alpha > 0) panel.showPolity(p);
+            else { histInfoOpen = false; panel.hide(); }
+          }
+          // 拖离该场战争所在年份 → 结束回放（exitWar 一并清图层/图钉/状态条）
+          // 守卫窗口必须用**夹到时间轴范围内**后的年份区间：战争年份可能整体落在
+          // 时间轴之外（或边界外一点），jumpToWar 传入的年份会被 setRange 夹取，
+          // 直接拿 meta.start/end 比较就会误判"已拖离"，回放刚起手就被结束。
+          if (focusWarId) {
+            const fw = warById(focusWarId);
+            const clampYear = (v) => Math.min(CHINA_HIST_MAX, Math.max(CHINA_HIST_MIN, v));
+            const lo = fw ? clampYear(Math.floor(fw.meta.start)) : 0;
+            const hi = fw ? clampYear(Math.ceil(fw.meta.end)) : 0;
+            if (!fw || y < lo || y > hi) exitWar();
+          }
         } else if (panel) {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
           // 则换成该时段的属性重绘（存续/历时/事件随之更新）；已不存在则清空介绍卡。
@@ -1273,6 +1836,12 @@ async function init() {
     });
     panel = createPanel({
       rulerName, // 宗主国/占领国查询（殖民地/保护国/托管地/被占领土卡片显示"被谁统治"）
+      onWarList: () => {
+        if (mode !== 'chinaHist') return; // 列表只服务第三幅图
+        warList?.toggle();
+      },
+      onExitWar: () => exitWar(),
+      onReplayWar: () => replayWar(),
       onToggleLayer: (k, v) => {
         if (k === 'zh') {
           labelChinese = v;
@@ -1284,13 +1853,18 @@ async function init() {
         updateLayers();
         if (panel && panel.rerender) panel.rerender(); // 刷新打开中的信息卡（简介+事件随语言/图层同步）
       },
-      onReset: () => map.flyTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: 800 }),
+      onReset: () => resetView(),
     });
     // 初始模式为世界地图：隐藏只对中国疆域生效的「历代政区界」开关
     if (panel && panel.setMode) panel.setMode(mode);
-    // 世界/中国模式切换
+    // 战争列表页（第三幅图）：选中 → jumpToWar
+    warList = createWarList({ onSelect: (id) => jumpToWar(id) });
+    const warBtn = document.getElementById('btn-war-list');
+    if (warBtn) warBtn.textContent = `⚔ 战争列表（${WARS.length}）`;
+    // 世界/中国/中国古代史 模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));
+    document.getElementById('mode-chinahist')?.addEventListener('click', () => setMode('chinaHist'));
     // 后台加载中国疆域：底图 + 王朝轮廓 + 历代政区
     Promise.all([loadChina(), loadChinaOutline(), loadChinaRegions()]).then(() => {
       if (mode === 'china') updateLayers();

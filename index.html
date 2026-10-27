@@ -15,6 +15,7 @@
     <div id="mode-switch">
       <button id="mode-world" class="active" type="button">世界地图</button>
       <button id="mode-china" type="button">中国疆域</button>
+      <button id="mode-chinahist" type="button">中国古代史</button>
     </div>
 
     <!-- 加载提示 -->
@@ -38,9 +39,21 @@
       <div class="legend-row"><span class="sw" style="background:rgb(200,70,70)"></span>被占领土</div>
     </div>
 
-    <!-- 右侧图层面板 -->
+    <!-- 右侧面板列：图层（上）+ 战争（下）两块独立卡片，第三幅图才显示战争卡 -->
+    <div id="right-stack">
     <div id="panel">
-      <div class="panel-title">图层</div>
+      <div class="panel-title">图层
+        <button id="btn-help" type="button" aria-label="数据来源与说明" title="数据来源与说明">!</button>
+      </div>
+      <div id="panel-help" class="hidden">
+        <b>数据来源</b>
+        <div>底图：MapLibre demotiles（含陆地/水域/国界）</div>
+        <div>世界疆域：CShapes 2.1（CC BY-NC-SA）；1886 年前用 historical-basemaps 年代快照</div>
+        <div>中国疆域：现代行政区划拼接 + historical-basemaps 王朝轮廓（CC BY-SA）</div>
+        <div>河流/山脉/湖泊：Natural Earth（公共领域）</div>
+        <div>关隘/城市/战争：公开史料整理，位置为示意精度</div>
+        <div>关隘按设置年代出现（废弃后不再显示）；城名随朝代变化</div>
+      </div>
       <!-- 公共图层：世界地图 / 中国疆域 两种模式都生效 -->
       <label><input type="checkbox" id="toggle-territory" checked /> 历史疆域</label>
       <label><input type="checkbox" id="toggle-river" checked /> 主要河流</label>
@@ -56,8 +69,31 @@
         <label id="row-outline"><input type="checkbox" id="toggle-outline" checked /> 史实边界参考线</label>
         <label id="row-region"><input type="checkbox" id="toggle-region" checked /> 历代政区界（州/府）</label>
       </div>
+      <div id="group-chinahist" style="display:none">
+        <div class="panel-divider"></div>
+        <label id="row-polity"><input type="checkbox" id="toggle-polity" checked /> 政权疆域</label>
+        <label id="row-pass"><input type="checkbox" id="toggle-pass" /> 关隘</label>
+        <label id="row-city"><input type="checkbox" id="toggle-city" /> 城市</label>
+        <label id="row-province"><input type="checkbox" id="toggle-province" checked /> 当代省界（参考线）</label>
+      </div>
       <button id="reset-view">复位视图</button>
-      <div class="panel-note">底图：MapLibre demotiles（含陆地/水域/国界）<br/>疆域：CShapes 2.1（CC BY-NC-SA）<br/>河流/山脉/湖泊：Natural Earth（公共领域，需先运行 <code>npm run fetch-data</code>）</div>
+    </div>
+
+    <!-- 战争面板（第三幅图专属）：列表入口 + 回放控制（重播 / 退出） -->
+    <div id="panel-war" class="hidden">
+      <div class="panel-title">战争</div>
+      <button id="btn-war-list" type="button">⚔ 战争列表</button>
+      <div id="war-playing" class="hidden">
+        <div class="wp-line">
+          <span class="wp-tag">▶ 回放中</span>
+          <span id="war-playing-name"></span>
+        </div>
+        <div class="wp-actions">
+          <button id="war-playing-replay" type="button">⟲ 重播</button>
+          <button id="war-playing-exit" type="button">✕ 退出</button>
+        </div>
+      </div>
+    </div>
     </div>
 
     <!-- 底部时间轴 -->
@@ -77,6 +113,21 @@
 
     <!-- 世界大事浮层（点击时间轴年份读数时弹出） -->
     <div id="world-events" class="hidden"></div>
+
+    <!-- 战争列表页（中国古代史：选中某场战争 → 跳转并单独回放军队演进） -->
+    <div id="war-list" class="hidden">
+      <div class="wl-head">
+        <span class="wl-title">⚔ 历代战争 · 点击回放</span>
+        <button id="war-list-close" type="button">×</button>
+      </div>
+      <div class="wl-filter">
+        <label for="war-era-select">朝代</label>
+        <select id="war-era-select"></select>
+        <span id="war-era-count" class="wl-count"></span>
+      </div>
+      <div id="war-list-body"></div>
+      <div class="wl-foot">选中后自动跳到该年并单独播放该场战争</div>
+    </div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

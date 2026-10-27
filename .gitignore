@@ -2,6 +2,8 @@
 node_modules/
 dist/
 .vite/
+# 校验用的一次性构建输出（vite --outDir .verify-dist）
+.verify-dist/
 
 # 本地工作流 / 缓存（非项目交付物）
 .workbuddy/
@@ -25,3 +27,6 @@ public/data/china_regions.geojson
 # 编辑器 / 系统
 .DS_Store
 *.local
+
+# Vite 加载配置时偶发产生的临时文件
+vite.config.js.timestamp-*

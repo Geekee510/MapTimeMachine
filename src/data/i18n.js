@@ -113,6 +113,19 @@ export const RIVER_ZH = {
   'Yamuna': '亚穆纳河',   'Yarkant': '叶尔羌河', 'Yarlung': '雅鲁藏布江', 'Yuan': '沅江',
   'Za': '扎河', 'Tanana': '塔纳诺河', 'Bykovskaya Protoka': '贝科夫斯卡亚支流',
   'Ferenc Csatorna': '费伦茨运河', 'Indragi': '因德拉吉河',
+  // 中国水系补充集（public/data/china_hydro.geojson，NE 1:10m 裁切）
+  // NE 1:50m 只保留了黄河/长江/珠江/黑龙江等干流，淮河、渭河、汾河、湘江这些
+  // 在中国历史里反复出现的中小流域整条缺失，所以单列一份补充集，译名一并补上。
+  'Huai': '淮河', 'Wei': '渭河', 'Jing': '泾河', 'Huan': '环江', 'Fen': '汾河',
+  'Qin': '沁河', 'Zhang': '漳河', 'Hai': '海河', 'Yongding': '永定河', 'Sanggan': '桑干河',
+  'Luan': '滦河', 'Wuding': '无定河', 'Jialing': '嘉陵江', 'Yalong': '雅砻江',
+  'Tuo': '沱江', 'Wu': '乌江', 'Xiang': '湘江', 'Liu': '柳江', 'Rong': '融江',
+  'Zuo': '左江', 'You': '右江', 'Yong': '邕江', 'Bei': '北江', 'Dong': '东江',
+  'Mei': '梅江', 'Jiulong': '九龙江', 'Fuchun': '富春江', 'Ou': '瓯江', 'Yi': '沂河',
+  'Ying': '颍河', 'Daling': '大凌河', 'Nen': '嫩江', 'Muling': '穆棱河',
+  'Chaor': '绰尔河', 'Nemor': '讷谟尔河', 'Tumen': '图们江', 'Yalu': '鸭绿江',
+  'Ussuri': '乌苏里江', 'Shiquan': '狮泉河', 'Maquan': '马泉河', 'Qarqan': '车尔臣河',
+  'Yurungkax': '玉龙喀什河', 'Aksu': '阿克苏河', 'Toxkan': '托什干河', 'Künes': '巩乃斯河',
 };
 
 export const MOUNTAIN_ZH = {
