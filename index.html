@@ -16,6 +16,7 @@
       <button id="mode-world" class="active" type="button">世界地图</button>
       <button id="mode-china" type="button">中国疆域</button>
       <button id="mode-chinahist" type="button">中国古代史</button>
+      <button id="mode-modern" type="button">中国近代史</button>
     </div>
 
     <!-- 加载提示 -->
@@ -76,13 +77,28 @@
         <label id="row-city"><input type="checkbox" id="toggle-city" /> 城市</label>
         <label id="row-province"><input type="checkbox" id="toggle-province" checked /> 当代省界（参考线）</label>
       </div>
+      <div id="group-modern" style="display:none">
+        <div class="panel-divider"></div>
+        <label><input type="checkbox" id="toggle-mfaction" checked /> 控制区（政权 / 军阀 / 根据地）</label>
+        <label><input type="checkbox" id="toggle-mevent" checked /> 大事图钉</label>
+        <label><input type="checkbox" id="toggle-mport" checked /> 通商口岸</label>
+        <label><input type="checkbox" id="toggle-mrail" checked /> 铁路网</label>
+        <label><input type="checkbox" id="toggle-mconcession" /> 租界</label>
+        <label><input type="checkbox" id="toggle-msphere" /> 列强势力范围（1898–）</label>
+        <label><input type="checkbox" id="toggle-mprovince" checked /> 当代省界（参考线）</label>
+      </div>
       <button id="reset-view">复位视图</button>
     </div>
 
     <!-- 战争面板（第三幅图专属）：列表入口 + 回放控制（重播 / 退出） -->
     <div id="panel-war" class="hidden">
-      <div class="panel-title">战争</div>
+      <div class="panel-title"><span id="war-panel-title">战争</span></div>
       <button id="btn-war-list" type="button">⚔ 战争列表</button>
+      <!-- 近代史专属：年表 / 专题。与战争列表同属"讲故事"的入口，放在一张卡里 -->
+      <div id="war-modern-tools" class="hidden">
+        <button id="btn-event-list" type="button">📜 大事年表</button>
+        <button id="btn-topic-list" type="button">📖 专题长文</button>
+      </div>
       <div id="war-playing" class="hidden">
         <div class="wp-line">
           <span class="wp-tag">▶ 回放中</span>
@@ -114,6 +130,21 @@
     <!-- 世界大事浮层（点击时间轴年份读数时弹出） -->
     <div id="world-events" class="hidden"></div>
 
+    <!-- 阶段综述卡（仅中国近代史）：随年份自动切换为所在阶段的综述。
+         与"大事年表"分工：这里讲这一段为什么是这样（结构/因果），年表讲发生了什么（时序）。 -->
+    <div id="stage-card" class="hidden">
+      <div class="sc-top">
+        <span class="sc-kicker">阶段综述</span>
+        <span id="stage-period">1840 – 1912</span>
+        <button id="stage-toggle" type="button">展开 ▾</button>
+      </div>
+      <b id="stage-title"></b>
+      <p id="stage-lead"></p>
+      <div id="stage-body" class="hidden"></div>
+      <div id="stage-keys"></div>
+      <p id="stage-last"></p>
+    </div>
+
     <!-- 战争列表页（中国古代史：选中某场战争 → 跳转并单独回放军队演进） -->
     <div id="war-list" class="hidden">
       <div class="wl-head">
@@ -127,6 +158,31 @@
       </div>
       <div id="war-list-body"></div>
       <div class="wl-foot">选中后自动跳到该年并单独播放该场战争</div>
+    </div>
+
+    <!-- 大事年表（仅中国近代史）：按五个时期分组，点条目跳到该年并打开事件卡 -->
+    <div id="event-list" class="hidden">
+      <div class="wl-head">
+        <span class="wl-title">📜 近代大事年表 · 点击跳转</span>
+        <button id="event-list-close" type="button">×</button>
+      </div>
+      <div class="wl-filter" id="event-tabs"></div>
+      <div id="event-list-body"></div>
+      <div class="wl-foot">点条目跳到该年并打开说明；拖动时间轴可看当年疆域</div>
+    </div>
+
+    <!-- 专题长文（仅中国近代史）：地图装不下的来龙去脉放这里 -->
+    <div id="topic-page" class="hidden">
+      <div class="tp-card">
+        <div class="tp-head">
+          <span id="tp-period"></span>
+          <button id="topic-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <h2 id="tp-title"></h2>
+        <p id="tp-lead"></p>
+        <div id="tp-body"></div>
+        <div id="tp-keys"></div>
+      </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>

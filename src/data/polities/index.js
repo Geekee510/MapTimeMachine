@@ -58,7 +58,10 @@ const PARALLEL_PALETTE = [
 const EXTRA_PATCH_KEYS = {
   'tang:唐': { segIndexes: [0], keys: ['mongolia'] },
   yuan: { segIndexes: [0], keys: ['mongolia'] },
-  qing: { segIndexes: [0], keys: ['mongolia'] },
+  // 清还要外东北（1858/1860 前，含库页岛）与巴尔喀什湖以东（1864 前）。
+  // 第三幅图每个朝代只画一个"极盛"切片，所以按极盛疆域补全；
+  // 近代史那幅图有 1860/1864 两条时间切片，会按时失地（见 chinaModern/data/factions.js）。
+  qing: { segIndexes: [0], keys: ['mongolia', 'outer-manchuria', 'balkhash'] },
 };
 
 // 判断某个并立政权是否应算作"中央王朝"（决定配色与是否画进历史疆域底图）。

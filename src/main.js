@@ -7,6 +7,7 @@ import { loadCShapes } from './data/loaders.js';
 import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.js';
 import { polityDesc, fallbackDesc, regionOf } from './data/polity-desc.js';
 import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
+import { chinaEventsOfYear, nearestChinaEvents, createEventCollector } from './data/china-events.js';
 import { dissolveFeatures } from './lib/geo.js';
 import { clearTerritoryCache } from './modes/chinaHist/territoryGen.js';
 import { getWorldEvents } from './data/worldEvents.js';
@@ -30,11 +31,51 @@ import {
   battleCard,
   warCard,
 } from './modes/chinaHist/features.js';
-import { warById, warView, WARS } from './modes/chinaHist/wars.js';
+import { warById, warView, WARS, warListGroups } from './modes/chinaHist/wars.js';
 import { PASSES } from './modes/chinaHist/passes.js';
 import { CITIES } from './modes/chinaHist/cities.js';
 import { createWarList } from './ui/warList.js';
+import { createStoryStage } from './ui/storyStage.js';
+import { createUnifiedTimeline } from './ui/unifiedTimeline.js';
 import { createPinLayer } from './ui/pinLayer.js';
+// 第四幅图「中国近代史」（1840–1950）：控制区 + 势力范围 + 铁路 + 口岸/租界 + 大事图钉
+import {
+  CHINA_MODERN_MIN,
+  CHINA_MODERN_MAX,
+  buildModernTerritoryLayers,
+  buildModernSphereLayers,
+  buildModernRailwayLayers,
+  buildModernPortLayers,
+  buildModernConcessionLayers,
+  modernEventPins,
+  getFactionInfo,
+  getModernYearEvents,
+  stageAtYear,
+  eventCoord,
+} from './modes/chinaModern/index.js';
+import {
+  eventCard,
+  portCard,
+  concessionCard,
+  railwayCard,
+  sphereCard,
+  modernWarCard,
+  factionCard,
+} from './modes/chinaModern/features.js';
+import {
+  MODERN_WARS,
+  modernWarById,
+  modernWarGroups,
+  eventById as modernEventById,
+  FACTIONS as MODERN_FACTIONS,
+  EVENTS as MODERN_EVENTS,
+  PORTS as MODERN_PORTS,
+  CONCESSIONS as MODERN_CONCESSIONS,
+  RAILWAYS as MODERN_RAILWAYS,
+  TOPICS as MODERN_TOPICS,
+  EVENT_GROUPS as MODERN_EVENT_GROUPS,
+} from './modes/chinaModern/data/index.js';
+import { TOPICS, TOPIC_BY_ID, topicEntries } from './modes/chinaModern/data/topics.js';
 
 const YEAR_MIN = -3000; // 世界模式下限：公元前 3000 年（此前为史前考古文化，不做政治疆域）
 const YEAR_MAX = 2023;
@@ -71,6 +112,10 @@ const MODE_VIEW = {
   world:     { center: WORLD_CENTER, zoom: WORLD_ZOOM, pitch: 0, bearing: 0 },
   china:     { center: CHINA_CENTER, zoom: CHINA_ZOOM, pitch: 0, bearing: 0 },
   chinaHist: { center: [108.6, 34.4], zoom: 4.0, pitch: 0, bearing: 0 },
+  // 近代史：版图含外蒙古、外东北、巴尔喀什湖以东（1840 年那一版），
+  // 经度 72–143°、纬度 18–54°，比古代史"中原核心区"大一圈。
+  // 缩到 3.2 才装得下整幅：原来 3.9 时疆域四边全被画面切掉，反而看不出边界。
+  modern:    { center: [107.5, 36.2], zoom: 3.2, pitch: 0, bearing: 0 },
 };
 
 let currentYear = 1960;
@@ -96,18 +141,24 @@ let warHoldAcc = 0;        // 一场战争演完后在终点停留的累计秒�
 let focusWarId = null;     // 战争列表页'选中某场战争'时的单独回放目标（null=不回放）
 let selectedPassId = null; // 当前选中的关隘（地图上显示选中态）
 let warList = null;        // 战争列表页实例
+// 专题动画舞台按 id 懒创建（见 openStoryStage），缓存表在函数上方
 let pinLayer = null;       // 关隘/交战点图钉层（MapLibre Marker 池）
 const WAR_SECONDS = 16;    // 一场战争演进动画的时长（秒，放慢便于看清路线）
 const WAR_END_HOLD = 2.6;  // 演完在终点停留（秒）后再循环
-const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true };
+const layersState = { territory: true, outline: false, region: false, relief: false, river: true, riverLabel: true, mountain: true, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true, mfaction: true, mevent: true, mport: true, mrail: true, mconcession: false, msphere: false, mprovince: true };
 
 // 各模式进入时的图层默认（切到该模式即套用，并同步面板勾选）。
 // 中国古代史默认：历史疆域 / 主要河流 / 地形渲染 / 中文标签 / 政权疆域 / 当代省界 /
 // 关隘 / 城市 开，其余关。关隘与城市是这个模式的主内容（可点击看背景），所以默认开。
+// 中国近代史默认：控制区 / 大事图钉 / 通商口岸 / 铁路网 / 当代省界 开；
+// 租界与势力范围默认关——两者都是小范围叠加层，一进来就全开会把疆域压花。
 const MODE_LAYER_DEFAULTS = {
-  world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true },
-  china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true },
-  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: true,  city: true,  zh: true },
+  world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true, mfaction: false, mevent: false, mport: false, mrail: false, mconcession: false, msphere: false, mprovince: false },
+  china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true, mfaction: false, mevent: false, mport: false, mrail: false, mconcession: false, msphere: false, mprovince: false },
+  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: true,  city: true,  zh: true, mfaction: false, mevent: false, mport: false, mrail: false, mconcession: false, msphere: false, mprovince: false },
+  // 近代史默认关地形晕渲：控制区颜色本身就偏灰（清=土黄、民国=蓝灰），
+  // 底下再叠一层山体阴影会把它们冲成同一片灰绿，政权差别读不出来。
+  modern:    { territory: false, outline: false, region: false, relief: false, river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true, mfaction: true,  mevent: true,  mport: true,  mrail: true,  mconcession: false, msphere: false, mprovince: true },
 };
 let labelChinese = true; // 中文标签开关：true=中文（无译名回退英文），false=英文原名
 let mode = 'world'; // 视图模式：'world' 世界地图 | 'china' 中国历代疆域
@@ -121,6 +172,8 @@ let chinaPreqinLoaded = false; // 是否已触发过先秦几何加载（懒加�
 let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
 let histInfoOpen = false; // 第三模式（中国古代史）信息卡是否打开
 let histLastPolityId = null; // 当前展示的政权 id（年份拖动时刷新该卡）
+let modernInfoOpen = false; // 第四模式（中国近代史）信息卡是否打开
+let modernLastFactionId = null; // 当前展示的实体 id（年份拖动时刷新该卡）
 
 // 底图陆地显隐：CShapes 疆域数据不含小岛屿，底图(demotiles)却会画出
 // 大量沿岸小岛 → 海面上出现"白色小点"。默认把底图陆地沉入海色，
@@ -722,6 +775,20 @@ function computeLabelChars() {
     for (const pt of w.parties || []) { add(pt.short); add(pt.name); }
     for (const b of w.battles || []) add(b.name);
   }
+  // 第四幅图（中国近代史）的文本必须一并进字符集：
+  // deck.gl 的 TextLayer 只渲染 characterSet 里有的字，漏掉的字直接是空白——
+  // 实测"华北解放区"曾显示成"华北 区"（缺"解放"），很难从截图上判断是缺字还是排版问题。
+  for (const f of MODERN_FACTIONS) add(f.name);
+  for (const e of MODERN_EVENTS) add(e.name);
+  for (const p of MODERN_PORTS) add(p.name);
+  for (const c of MODERN_CONCESSIONS) add(c.name);
+  for (const r of MODERN_RAILWAYS) add(r.name);
+  for (const w of MODERN_WARS) {
+    add(w.meta.title);
+    for (const pt of w.parties || []) { add(pt.short); add(pt.name); }
+  }
+  // 地图上用的简称（见 chinaModern/index.js 的 LABEL_SHORT）
+  for (const t of ['汪伪政府', '蒙疆', '满洲国', '日军占领', '中华民国', '国民政府', '解放区', '根据地']) add(t);
   labelChars = [...s];
   detectMaxAtlasHeight();
   labelFontSettings = pickFontSettings(s.size);
@@ -1060,17 +1127,40 @@ function stopWarAnim() {
   }
 }
 
+// ── 战争数据源：第三幅图（古代）与第四幅图（近代）共用同一套动画/列表/回放 ──
+// 两份 wars 数据的展开结构完全同构（meta / parties / forces / battles），
+// 差别只有"取哪一份"和图层 id 前缀，所以按当前模式切换，不另写一套。
+function isWarMode(m = mode) {
+  return m === 'chinaHist' || m === 'modern';
+}
+function warSource(id, m = mode) {
+  return m === 'modern' ? modernWarById(id) : warById(id);
+}
+function warPool(m = mode) {
+  return m === 'modern' ? MODERN_WARS : WARS;
+}
+function warLayerOpts() {
+  return mode === 'modern' ? { wars: MODERN_WARS, layerPrefix: 'modern-war' } : {};
+}
+function warCardOf(w) {
+  return mode === 'modern' ? modernWarCard(w) : warCard(w);
+}
+// 该模式的时间轴范围（跳转战争年份时必须夹在里面，见 jumpToWar 注释）
+function yearRangeOf(m = mode) {
+  return m === 'modern' ? [CHINA_MODERN_MIN, CHINA_MODERN_MAX] : [CHINA_HIST_MIN, CHINA_HIST_MAX];
+}
+
 // 确保战争动画循环在运行：仅当处于 chinaHist、正回放某场战争（focusWarId）。
 // 每帧只重建战争图层（路线/箭头/队头），静态图层复用缓存，避免全量重绘。
 function ensureWarAnim() {
-  if (!(mode === 'chinaHist' && focusWarId && deckOverlay)) {
+  if (!(isWarMode() && focusWarId && deckOverlay)) {
     stopWarAnim();
     return;
   }
   if (warRaf) return;
   lastWarTs = performance.now();
   const tick = (ts) => {
-    if (mode !== 'chinaHist' || !focusWarId) {
+    if (!isWarMode() || !focusWarId) {
       warRaf = null;
       return;
     }
@@ -1091,6 +1181,7 @@ function ensureWarAnim() {
       labelFontSettings,
       labelFontFamily: LABEL_FONT_FAMILY,
       focusWarId,
+      ...warLayerOpts(),
     });
     deckOverlay.setProps({ layers: [...histStaticLayers, ...warLayers] });
     syncPins(); // 三角箭头图钉跟着进度走（DOM Marker，不占 deck 图层）
@@ -1121,31 +1212,73 @@ function exitWar() {
   updateLayers();
 }
 
+// 战争列表页里的「专题」条目 → 打开分阶段动画舞台。
+// 它们不是一场仗：没有交战双方、没有胜负，所以不走 jumpToWar，
+// 而是整屏切到叙事舞台（地图暂停在下面，关掉即回到原状）。
+// 三个专题共用同一个舞台实现，只是数据不同；按 id 懒创建并缓存——
+// 省界与河流各只请求一次，第二个专题打开是瞬时的。
+const storyStages = new Map();
+
+function openStoryStage(topicId, startIndex = 0) {
+  const topic = TOPIC_BY_ID.get(topicId) || TOPICS[0];
+  let stage = storyStages.get(topic.id);
+  if (!stage) {
+    stage = createStoryStage({
+      stages: topic.stages,
+      brand: topic.brand,
+      meta: topic.meta,
+      onClose: () => {},
+    });
+    storyStages.set(topic.id, stage);
+  }
+  stage.open(startIndex);
+  // 开发期方便逐帧核对（定位到某段某进度），生产构建里这段会被摇掉
+  if (import.meta.env.DEV) window.__story = stage;
+}
+
+// 统一时间轴导航器：点任意行跳该专题动画；下方内嵌逐年年份按钮，
+// 点年份即在面板列出当年四线大事（见 ui/unifiedTimeline.js）。
+const unifiedTimeline = createUnifiedTimeline({
+  onOpenStage: (topicId, idx) => openStoryStage(topicId, idx),
+});
+function openUnifiedTimeline() {
+  unifiedTimeline.open();
+}
+
 // 战争列表页选中某场战争 → 跳到该年、聚焦战区、单独回放该场
 // （军队演进动画由 ensureWarAnim 驱动；focusWarId 让当年只演这一场）
 function jumpToWar(warId) {
-  const w = warById(warId);
+  // 战争可能属于古代或近代两套数据：按 id 在哪一套里找（列表是从当前模式的池子点进来的，
+  // 但用户可以在弹层打开时切模式，所以两套都试一次最稳）。
+  const w = warSource(warId) || modernWarById(warId) || warById(warId);
   if (!w) return;
-  if (mode !== 'chinaHist') setMode('chinaHist');
+  // 战争归属哪个模式：近代 wars 的 meta.group 是"晚清/军阀/红军/抗战/解放"，
+  // 古代是朝代名，用 id 在近代池里是否命中来判断。
+  const targetMode = modernWarById(w.id) ? 'modern' : 'chinaHist';
+  if (mode !== targetMode) setMode(targetMode);
   focusWarId = w.id;
   // 年份必须夹在时间轴范围内：setRange → setYear 会自己做一次夹取，
-  // 若这里传的范围外年份（如涿鹿 前2600 而时间轴本来从前2070 起），
-  // onYear 收到的是被夹过的年份，与战争窗口对不上，回放会被立刻结束。
-  // 取整用 trunc 而不是 round：数据里的 -1046.05 / 1645.5 是"某年内的时点"，
-  // 小数只是年内位置，截掉即该年（round 会把 1645.5 显示成 1646）。
+  // 若这里传的范围外年份，onYear 收到的是被夹过的年份，与战争窗口对不上，
+  // 回放会被立刻结束。取整用 trunc 而不是 round：数据里的 -1046.05 / 1645.5
+  // 是"某年内的时点"，小数只是年内位置，截掉即该年（round 会把 1645.5 显示成 1646）。
+  const [yMin, yMax] = yearRangeOf(targetMode);
   const rawY = Math.trunc(w.meta.start);
-  const y = Math.min(CHINA_HIST_MAX, Math.max(CHINA_HIST_MIN, rawY));
+  const y = Math.min(yMax, Math.max(yMin, rawY));
   currentYear = y;
   warProgress = 0;
   warHoldAcc = 0;
   // setRange 内部会触发 onYear → updateLayers（顺带刷新年份大字与时间轴滑块）
-  if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, y);
+  if (timeline) timeline.setRange(yMin, yMax, y);
   stopWarAnim();
   updateLayers();
   const v = warView(w);
-  if (map) map.flyTo({ center: v.center, zoom: v.zoom, duration: 1100 });
+  // 近代战争的战场跨度远大于古代单场战役（淮海从郑州到徐州、渡江从湖口到江阴），
+  // warView 按"部队轨迹外接框"算出来的缩放会贴得太近，进去只见几个县。
+  // 近代统一退 1.4 级，保证能看到整条战线与周边根据地/沦陷区的对比。
+  const zoom = targetMode === 'modern' ? Math.max(4.3, v.zoom - 1.4) : v.zoom;
+  if (map) map.flyTo({ center: v.center, zoom, duration: 1100 });
   if (panel) {
-    panel.showPlace(warCard(w)); // 顺手把这场战争的背景卡摊开
+    panel.showPlace(warCardOf(w)); // 顺手把这场战争的背景卡摊开
     panel.setWarPlaying(w.meta.title); // 战争面板显示"回放中 + 重播/退出"
   }
   warList?.setActive(w.id);
@@ -1157,27 +1290,42 @@ function jumpToWar(warId) {
 // deck 侧也只重建两条路线图层，代价很小。
 function syncPins() {
   if (!pinLayer) return;
-  if (mode !== 'chinaHist') {
+  if (!isWarMode()) {
     pinLayer.clear();
     return;
   }
   const pins = [];
-  if (layersState.pass) {
-    // 关隘按年份筛选：早于设置年不出现、废弃后消失（见 passes.js）
-    pins.push(...passPins({ year: currentYear, selectedId: selectedPassId }));
+
+  if (mode === 'chinaHist') {
+    if (layersState.pass) {
+      // 关隘按年份筛选：早于设置年不出现、废弃后消失（见 passes.js）
+      pins.push(...passPins({ year: currentYear, selectedId: selectedPassId }));
+    }
+  } else if (layersState.mevent) {
+    // 近代史：当年发生/正在进行的大事（图钉颜色表示分组：晚清/军阀/红军/抗战/解放）
+    pins.push(...modernEventPins(currentYear));
   }
-  if (focusWarId) pins.push(...warPins(currentYear, warProgress ?? 0, { focusWarId }));
+
+  if (focusWarId) {
+    pins.push(...warPins(currentYear, warProgress ?? 0, { focusWarId, ...warLayerOpts() }));
+  }
+
   pinLayer.sync(pins, {
     onClick: (pin) => {
       if (pin.kind === 'pass') {
         selectedPassId = pin.payload.id;
         if (panel) panel.showPlace(passCard(pin.payload, currentYear));
         updateLayers(); // 重绘以显示选中态
+      } else if (pin.kind === 'event') {
+        const e = modernEventById(pin.payload.eventId);
+        if (e && panel) panel.showPlace(eventCard(e));
       } else if (pin.kind === 'clash' || pin.kind === 'battle') {
-        if (panel) panel.showPlace(battleCard(pin.payload)); // 交战点 → 整场战争的背景卡
+        const w = warSource(pin.payload?.warId);
+        if (w && panel) panel.showPlace(warCardOf(w)); // 交战点 → 整场战争的背景卡
+        else if (panel) panel.showPlace(battleCard(pin.payload));
       } else if (pin.kind === 'rider' || pin.kind === 'tri') {
-        const w = warById(pin.payload?.warId);
-        if (w && panel) panel.showPlace(warCard(w));
+        const w = warSource(pin.payload?.warId);
+        if (w && panel) panel.showPlace(warCardOf(w));
       }
     },
   });
@@ -1223,6 +1371,109 @@ function updateLayers() {
       if (l) layers.push(l);
     }
     deckOverlay.setProps({ layers });
+    return;
+  }
+  // 第四模式：中国近代史（1840–1950）
+  // 层级自下而上：势力范围（很淡）→ 控制区填充 → 控制区轮廓 → 政权名 →
+  //               水系 → 铁路 → 口岸 → 租界 → 当代省界参考线 → 图钉/战争动画。
+  // 注意水系必须排在控制区之后（同中国古代史）：先入的在下层，否则河湖被填充盖住。
+  if (mode === 'modern') {
+    if (layersState.mfaction) {
+      layers.push(
+        ...buildModernTerritoryLayers({
+          year: currentYear,
+          chinaProvinces,
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          onPick: (id) => {
+            modernLastFactionId = id;
+            modernInfoOpen = true;
+            if (panel) panel.showPlace(factionCard(getFactionInfo(id, currentYear, { chinaProvinces })));
+          },
+        })
+      );
+    }
+    // 势力范围必须画在控制区**之后**：它是 46 透明度的薄色，放在填充下面会被
+    // 138 透明度的疆域整片盖住（实测开与不开完全没区别）。
+    if (layersState.msphere) {
+      layers.push(
+        ...buildModernSphereLayers({
+          year: currentYear,
+          chinaProvinces,
+          onPick: (sp) => { if (panel) panel.showPlace(sphereCard(sp)); },
+        })
+      );
+    }
+    if (layersState.river && rivers) {
+      const l = buildRiverLineLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.riverLabel && rivers) {
+      const l = buildRiverLabelLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.lake && lakes) {
+      const l = buildLakeLayer();
+      if (l) layers.push(l);
+    }
+    if (layersState.mrail) {
+      layers.push(
+        ...buildModernRailwayLayers({
+          year: currentYear,
+          zoom: map ? map.getZoom() : 4,
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          onPick: (r) => { if (panel) panel.showPlace(railwayCard(r)); },
+        })
+      );
+    }
+    if (layersState.mport) {
+      layers.push(
+        ...buildModernPortLayers({
+          year: currentYear,
+          zoom: map ? map.getZoom() : 4,
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          onPick: (pt) => { if (panel) panel.showPlace(portCard(pt)); },
+        })
+      );
+    }
+    if (layersState.mconcession) {
+      layers.push(
+        ...buildModernConcessionLayers({
+          year: currentYear,
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          onPick: (c) => { if (panel) panel.showPlace(concessionCard(c)); },
+        })
+      );
+    }
+    if (layersState.mprovince) {
+      const pr = buildChinaProvinceRefLayer();
+      if (pr) layers.push(pr);
+    }
+    syncPins();
+    histStaticLayers = layers.slice();
+    if (focusWarId) {
+      if (warProgress == null) warProgress = 0;
+      layers.push(
+        ...buildWarLayers(currentYear, warProgress, {
+          labelChars,
+          labelFontSettings,
+          labelFontFamily: LABEL_FONT_FAMILY,
+          focusWarId,
+          ...warLayerOpts(),
+        })
+      );
+    } else {
+      warProgress = null;
+    }
+    deckOverlay.setProps({ layers });
+    ensureWarAnim();
     return;
   }
   // 第三模式：中国古代史（汉/唐/明 + 三国/南北朝/五代十国）
@@ -1345,6 +1596,157 @@ function fmtYear(y) {
 }
 function updateYearLabel() {
   document.getElementById('year-display').textContent = fmtYear(currentYear);
+  updateStageCard();
+}
+
+// ── 阶段综述卡（近代史专属）───────────────────────────────────────────────
+// 年份一落到另一个阶段就换一篇（晚清/北洋/国民政府十年/抗战/解放）。
+// 展开状态跟随用户选择：拖动年份不强行收起，否则每换一阶段就要重新点开。
+let stageOpen = false;
+let stageLastId = null;
+function updateStageCard() {
+  const card = document.getElementById('stage-card');
+  if (!card) return;
+  if (mode !== 'modern') {
+    card.classList.add('hidden');
+    stageLastId = null;
+    return;
+  }
+  card.classList.remove('hidden');
+  const st = stageAtYear(currentYear);
+  if (!st) return;
+  if (stageLastId !== st.id) {
+    stageLastId = st.id;
+    const period = document.getElementById('stage-period');
+    const title = document.getElementById('stage-title');
+    const lead = document.getElementById('stage-lead');
+    const body = document.getElementById('stage-body');
+    const keys = document.getElementById('stage-keys');
+    const lastEl = document.getElementById('stage-last');
+    if (period) period.textContent = `${st.period[0]} – ${st.period[1]}`;
+    if (title) title.textContent = st.title;
+    if (lead) lead.textContent = st.lead || '';
+    if (body) {
+      body.innerHTML = (st.sections || [])
+        .map((s) => `<h4>${s.h}</h4>${(s.p || []).map((p) => `<p>${p}</p>`).join('')}`)
+        .join('');
+    }
+    if (keys) keys.innerHTML = (st.keyPoints || []).map((k) => `<span>${k}</span>`).join('');
+    if (lastEl) lastEl.textContent = st.last || '';
+  }
+  document.getElementById('stage-body')?.classList.toggle('hidden', !stageOpen);
+  document.getElementById('stage-last')?.classList.toggle('hidden', !stageOpen || !document.getElementById('stage-last')?.textContent);
+  const tgl = document.getElementById('stage-toggle');
+  if (tgl) tgl.textContent = stageOpen ? '收起 ▴' : '展开 ▾';
+}
+
+// ── 大事年表 / 专题长文（近代史专属）─────────────────────────────────────
+// 地图只能放图钉，讲不清"为什么"；年表交代顺序，专题交代因果。
+// 两者共用弹层槽位，一次只开一个，否则小屏幕上会叠三层。
+// 条目左侧标的是**事件分类**（政/外/战/经/文/科），不是时代——
+// 时代已由上方分组 tab 表达，再标一遍等于没标。
+let evTab = 'all';
+
+const evTime = (t) => {
+  const y = Math.floor(t + 1e-9);
+  const m = Math.round((t - y) * 100);
+  return m ? `${y}.${String(m).padStart(2, '0')}` : String(y);
+};
+
+function renderEventList() {
+  const body = document.getElementById('event-list-body');
+  const tabs = document.getElementById('event-tabs');
+  if (!body || !tabs) return;
+  const mkTab = (key, label) => {
+    const n = key === 'all' ? MODERN_EVENTS.length : MODERN_EVENTS.filter((e) => e.group === key).length;
+    return `<button type="button" class="ev-tab${evTab === key ? ' active' : ''}" data-tab="${key}">${label}<span class="ev-n">${n}</span></button>`;
+  };
+  tabs.innerHTML = [mkTab('all', '全部'), ...MODERN_EVENT_GROUPS.map((g) => mkTab(g, g))].join('');
+  const list = MODERN_EVENTS.filter((e) => evTab === 'all' || e.group === evTab);
+  body.innerHTML = list
+    .map(
+      (e) => `<button type="button" class="ev-item" data-id="${e.id}">
+        <span class="ev-y">${evTime(e.start)}</span>
+        <span class="ev-main">
+          <span class="ev-name"><span class="ev-cat cat-${e.cat || '政'}">${e.cat || '政'}</span>${e.name}</span>
+          <span class="ev-desc">${e.summary || ''}</span>
+        </span>
+      </button>`
+    )
+    .join('');
+}
+
+function openEventList() {
+  if (mode !== 'modern') return;
+  renderEventList();
+  document.getElementById('event-list')?.classList.remove('hidden');
+  warList?.close();
+}
+
+/** 年表条目 → 跳到该年、飞过去、摊开事件卡。 */
+function jumpToEvent(id) {
+  const e = modernEventById(id);
+  if (!e) return;
+  if (mode !== 'modern') setMode('modern');
+  // 事件可能跨年（如鸦片战争 1840.05–1842.08），跳到**开始那年**更符合"从头看起"
+  const [yMin, yMax] = yearRangeOf('modern');
+  const y = Math.min(yMax, Math.max(yMin, Math.trunc(e.start)));
+  currentYear = y;
+  if (timeline) timeline.setRange(yMin, yMax, y); // 内部触发 onYear → updateLayers
+  updateLayers();
+  const c = eventCoord(e);
+  if (map && c) {
+    // 同一年里事件可能挨得很近，缩放过大会像同一点；4.6 能同时看到周边态势
+    map.flyTo({ center: c, zoom: Math.max((map.getZoom() || 4), 4.6), duration: 1000 });
+  }
+  if (panel) panel.showPlace(eventCard(e));
+  document.getElementById('event-list')?.classList.add('hidden');
+}
+
+// ── 专题长文 ────────────────────────────────────────────────────────────
+function renderTopicList() {
+  if (mode !== 'modern') return;
+  // 专题没有列表页，直接开第一篇并把其余篇做成卡内跳转太绕；
+  // 这里用"专题目录"的形式：先在弹层里列出四篇的标题 + 导语，点进去看全文。
+  const body = document.getElementById('tp-body');
+  const card = document.getElementById('topic-page');
+  if (!body || !card) return;
+  document.getElementById('tp-period').textContent = '专题目录';
+  document.getElementById('tp-title').textContent = '近代史四个绕不开的问题';
+  document.getElementById('tp-lead').textContent =
+    '地图与年表能回答"何时、何地"，但有几件事必须连起来讲才说得清：军阀为何混战、长征怎么走成那样、抗战的三条战线如何并存、解放战争三年为何翻盘。';
+  body.innerHTML = MODERN_TOPICS.map(
+    (t) => `<h3>${t.title}<span style="font-weight:400;font-size:12px;color:#a08b74">　${t.period[0]}–${t.period[1]}</span></h3>
+      <p>${t.lead}</p>
+      <p><button type="button" class="panel-wide" data-topic="${t.id}" style="width:auto;padding:5px 14px;margin-bottom:14px">阅读全文 →</button></p>`
+  ).join('');
+  document.getElementById('tp-keys').innerHTML = '';
+  card.classList.remove('hidden');
+  card.dataset.view = 'list';
+}
+
+function openTopic(id) {
+  const t = MODERN_TOPICS.find((x) => x.id === id);
+  if (!t) return;
+  const card = document.getElementById('topic-page');
+  if (!card) return;
+  document.getElementById('tp-period').textContent = `${t.period[0]} – ${t.period[1]}`;
+  document.getElementById('tp-title').textContent = t.title;
+  document.getElementById('tp-lead').textContent = t.lead || '';
+  document.getElementById('tp-body').innerHTML = (t.sections || [])
+    .map((s) => `<h3>${s.h}</h3>${(s.p || []).map((p) => `<p>${p}</p>`).join('')}`)
+    .join('');
+  document.getElementById('tp-keys').innerHTML = (t.keyPoints || []).map((k) => `<span>${k}</span>`).join('');
+  card.classList.remove('hidden');
+  card.dataset.view = 'topic';
+  card.querySelector('.tp-card')?.scrollTo({ top: 0 });
+}
+
+function closeTopic() {
+  const card = document.getElementById('topic-page');
+  if (!card) return;
+  card.classList.add('hidden');
+  card.dataset.view = '';
 }
 
 function addOverlayOnce() {
@@ -1646,15 +2048,34 @@ function buildChinaProvinceRefLayer() {
 
 // 年份事件内容（供时间轴年份读数点击）：世界模式=世界大事，中国模式=朝代信息
 function getYearEvents(y) {
+  if (mode === 'modern') {
+    return getModernYearEvents(y);
+  }
   if (mode === 'chinaHist') {
     return getChinaHistYearEvents(y);
   }
   if (mode === 'china') {
     const d = getDynastyAtYear(y);
     if (!d) return { title: `📜 ${fmtYear(y)} · 暂无对应朝代`, items: [] };
-    const items = [{ t: `都城：${d.capital}`, d: d.desc }];
-    for (const e of d.events || []) items.push({ t: `${fmtYear(e.year)} ${e.title}`, d: e.desc, cat: e.cat });
-    return { title: `📜 ${fmtYear(y)} · ${d.name}朝（${fmtYear(d.start)} – ${fmtYear(d.end)}）`, items };
+    // 同样只列"这一年发生"的事：原来把整朝的 events 全摊出来，
+    // 于是点 1700 年会看到"1884 甲午"这种还没发生的事。
+    const col = createEventCollector();
+    for (const e of chinaEventsOfYear(y)) col.push(e.t, e.d, e.c);
+    for (const e of d.events || []) if (Math.trunc(e.year) === y) col.push(e.title, e.desc, e.cat);
+    const items = col.items;
+    const n = items.length;
+    if (!n) {
+      items.push({ t: '本年无确切纪事', d: `都城：${d.capital}｜${d.desc}` });
+      const { prev, next } = nearestChinaEvents(y);
+      if (prev) items.push({ t: prev.t, d: prev.d, cat: prev.c, span: `在此之前 ${y - prev.y} 年` });
+      if (next) items.push({ t: next.t, d: next.d, cat: next.c, span: `${next.y - y} 年后` });
+    }
+    return {
+      title: n
+        ? `📜 ${fmtYear(y)} · ${d.name}朝（${fmtYear(d.start)} – ${fmtYear(d.end)}）· 当年 ${n} 件大事`
+        : `📜 ${fmtYear(y)} · ${d.name}朝（${fmtYear(d.start)} – ${fmtYear(d.end)}）· 本年无确切纪事`,
+      items,
+    };
   }
   return { title: `🌍 ${fmtYear(y)} 年 · 世界大事`, items: getWorldEvents(y) };
 }
@@ -1673,21 +2094,27 @@ function resetView() {
 
 function setMode(m) {
   mode = m;
-  stopWarAnim(); // 切换模式时停止战争动画循环（离开 chinaHist 后不再逐帧重绘）
+  stopWarAnim(); // 切换模式时停止战争动画循环（离开战争类模式后不再逐帧重绘）
   document.getElementById('mode-world')?.classList.toggle('active', m === 'world');
   document.getElementById('mode-china')?.classList.toggle('active', m === 'china');
   document.getElementById('mode-chinahist')?.classList.toggle('active', m === 'chinaHist');
+  document.getElementById('mode-modern')?.classList.toggle('active', m === 'modern');
   const legendEl = document.getElementById('legend');
   if (legendEl) legendEl.style.display = m === 'world' ? '' : 'none';
   chinaInfoOpen = false;
   histInfoOpen = false;
   histLastPolityId = null;
+  modernInfoOpen = false;
+  modernLastFactionId = null;
   // 战争"单独回放"与关隘选中都是跨模式的状态，切模式时一并清掉，避免下次进来还锁着
   focusWarId = null;
   warProgress = null;
   warHoldAcc = 0;
   selectedPassId = null;
   warList?.close();
+  // 年表与专题是近代史专属弹层，切走时一并收起（否则会浮在别的地图上没人管）
+  document.getElementById('event-list')?.classList.add('hidden');
+  closeTopic();
   pinLayer?.clear(); // 图钉是 DOM，不随 deck 图层自动消失，必须显式清
   if (panel && panel.setWarPlaying) panel.setWarPlaying(null);
   // 关闭介绍卡：必须走 panel.hide() 清空内部 lastProps 状态。
@@ -1702,6 +2129,9 @@ function setMode(m) {
   }
   // 面板项随模式调整：「历代政区界」仅中国疆域模式有意义（世界模式隐藏该开关）
   if (panel && panel.setMode) panel.setMode(m);
+  // 战争按钮上的场次数随模式换（古代 155 场 / 近代 38 场）
+  const warBtnEl = document.getElementById('btn-war-list');
+  if (warBtnEl) warBtnEl.textContent = `⚔ 战争列表（${m === 'modern' ? MODERN_WARS.length : WARS.length}）`;
   // 套用该模式的图层默认，并同步面板勾选（首次进入中国古代史模式会切换成其专属默认）
   const def = MODE_LAYER_DEFAULTS[m];
   if (def) {
@@ -1710,8 +2140,8 @@ function setMode(m) {
     applyRelief();      // MapLibre 地形晕渲需随默认值重新生效
     applyBasemapLand(); // 今地图开关同理
   }
-  // 首次进入中国古代史模式时懒加载当代省界参考底图（非阻断：失败静默跳过）
-  if (m === 'chinaHist' && !chinaProvincesLoaded) {
+  // 首次进入中国古代史 / 中国近代史模式时懒加载当代省界底图（非阻断：失败静默跳过）
+  if ((m === 'chinaHist' || m === 'modern') && !chinaProvincesLoaded) {
     chinaProvincesLoaded = true;
     loadChinaProvinces();
   }
@@ -1731,6 +2161,11 @@ function setMode(m) {
     currentYear = -100;
     if (timeline) timeline.setRange(CHINA_HIST_MIN, CHINA_HIST_MAX, currentYear);
     flyToModeView('chinaHist');
+  } else if (m === 'modern') {
+    // 默认落在 1840（这套数据与叙事的起点）：清疆域完整，五口通商尚未开埠
+    currentYear = CHINA_MODERN_MIN;
+    if (timeline) timeline.setRange(CHINA_MODERN_MIN, CHINA_MODERN_MAX, currentYear);
+    flyToModeView('modern');
   } else {
     currentYear = 1960;
     if (timeline) timeline.setRange(YEAR_MIN, YEAR_MAX, currentYear);
@@ -1830,6 +2265,24 @@ async function init() {
             const hi = fw ? clampYear(Math.ceil(fw.meta.end)) : 0;
             if (!fw || y < lo || y > hi) exitWar();
           }
+        } else if (mode === 'modern') {
+          // 第四模式：年份拖动时若实体卡打开，刷新该实体（已不存续则关闭）
+          if (modernInfoOpen && panel) {
+            const active = modernLastFactionId
+              ? getFactionInfo(modernLastFactionId, y, { chinaProvinces })
+              : null;
+            // segNotes 为空 = 该年这个实体已经不在场
+            if (active && (active.segNotes || []).length) panel.showPlace(factionCard(active));
+            else { modernInfoOpen = false; panel.hide(); }
+          }
+          // 拖离该场战争所在年份 → 结束回放（同中国古代史，窗口先夹到时间轴范围内）
+          if (focusWarId) {
+            const fw = modernWarById(focusWarId);
+            const clampYear = (v) => Math.min(CHINA_MODERN_MAX, Math.max(CHINA_MODERN_MIN, v));
+            const lo = fw ? clampYear(Math.floor(fw.meta.start)) : 0;
+            const hi = fw ? clampYear(Math.ceil(fw.meta.end)) : 0;
+            if (!fw || y < lo || y > hi) exitWar();
+          }
         } else if (panel) {
           // 世界模式：国家卡随年份同步——同一国家（gwcode 相同）在当前年份仍有疆域，
           // 则换成该时段的属性重绘（存续/历时/事件随之更新）；已不存在则清空介绍卡。
@@ -1859,7 +2312,7 @@ async function init() {
     panel = createPanel({
       rulerName, // 宗主国/占领国查询（殖民地/保护国/托管地/被占领土卡片显示"被谁统治"）
       onWarList: () => {
-        if (mode !== 'chinaHist') return; // 列表只服务第三幅图
+        if (!isWarMode()) return; // 列表只服务古代史 / 近代史两幅图
         warList?.toggle();
       },
       onExitWar: () => exitWar(),
@@ -1879,14 +2332,76 @@ async function init() {
     });
     // 初始模式为世界地图：隐藏只对中国疆域生效的「历代政区界」开关
     if (panel && panel.setMode) panel.setMode(mode);
-    // 战争列表页（第三幅图）：选中 → jumpToWar
-    warList = createWarList({ onSelect: (id) => jumpToWar(id) });
+    // 战争列表页（古代史 / 近代史共用一套 UI，数据源与年份格式随模式切换）
+    warList = createWarList({
+      onSelect: (id) => jumpToWar(id),
+      onSpecial: (id) => {
+        if (id === 'unified-timeline') openUnifiedTimeline();
+        else openStoryStage(id);
+      },
+      groups: () => {
+        if (mode !== 'modern') return warListGroups();
+        // 近代在战争目录最前面插一个「专题」分组：四条主线各自十年上下，
+        // 不是任何一场战役能装下的。条目由 topics.js 统一给出。
+        // 分组顶部再加一个"民国军政主线"总览，点开即统一时间轴导航器。
+        const specials = [
+          { id: 'unified-timeline', title: '民国军政主线 · 时间轴总览', sub: '点行跳各专题动画；下方年份按钮列当年大事' },
+          ...topicEntries(),
+        ];
+        return [{ era: '专题', wars: [], special: specials }, ...modernWarGroups()];
+      },
+      // 近代的 meta.era 已经是"1937 年 7 月"这种精确到月的表述，年份那栏不必再重复
+      fy: (y) => (mode === 'modern' ? '' : null),
+      allLabel: () => (mode === 'modern' ? '全部时期' : '全部朝代'),
+    });
     const warBtn = document.getElementById('btn-war-list');
     if (warBtn) warBtn.textContent = `⚔ 战争列表（${WARS.length}）`;
-    // 世界/中国/中国古代史 模式切换
+    // 世界/中国/中国古代史/中国近代史 模式切换
     document.getElementById('mode-world')?.addEventListener('click', () => setMode('world'));
     document.getElementById('mode-china')?.addEventListener('click', () => setMode('china'));
     document.getElementById('mode-chinahist')?.addEventListener('click', () => setMode('chinaHist'));
+    document.getElementById('mode-modern')?.addEventListener('click', () => setMode('modern'));
+    // 阶段综述卡：展开/收起（内容本身随年份自动换，这里只管折叠状态）
+    document.getElementById('stage-toggle')?.addEventListener('click', () => {
+      stageOpen = !stageOpen;
+      updateStageCard();
+    });
+    // 近代史：大事年表 / 专题长文
+    document.getElementById('btn-event-list')?.addEventListener('click', openEventList);
+    document.getElementById('btn-topic-list')?.addEventListener('click', renderTopicList);
+    document.getElementById('event-list-close')?.addEventListener('click', () => {
+      document.getElementById('event-list')?.classList.add('hidden');
+    });
+    // 年表：切分组（事件委托，列表每次重绘，不必逐个绑）
+    document.getElementById('event-tabs')?.addEventListener('click', (ev) => {
+      const b = ev.target.closest('.ev-tab');
+      if (!b) return;
+      evTab = b.dataset.tab;
+      renderEventList();
+    });
+    document.getElementById('event-list-body')?.addEventListener('click', (ev) => {
+      const b = ev.target.closest('.ev-item');
+      if (b) jumpToEvent(b.dataset.id);
+    });
+    // 专题：关闭 / 目录内跳转
+    document.getElementById('topic-close')?.addEventListener('click', closeTopic);
+    document.getElementById('topic-page')?.addEventListener('click', (ev) => {
+      const card = document.getElementById('topic-page');
+      // 点遮罩空白处关闭；点卡片内部不关
+      if (ev.target === card) closeTopic();
+      const b = ev.target.closest('[data-topic]');
+      if (b) openTopic(b.dataset.topic);
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      const tp = document.getElementById('topic-page');
+      if (tp && !tp.classList.contains('hidden')) {
+        if (tp.dataset.view === 'topic') renderTopicList(); // 从全文退回目录
+        else closeTopic();
+        return;
+      }
+      document.getElementById('event-list')?.classList.add('hidden');
+    });
     // 后台加载中国疆域：底图 + 王朝轮廓 + 历代政区
     Promise.all([loadChina(), loadChinaOutline(), loadChinaRegions()]).then(() => {
       if (mode === 'china') updateLayers();

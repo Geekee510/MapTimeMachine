@@ -6,6 +6,7 @@
 // 疆域由 territoryGen 依据「现代省界并集 + Chaikin 补丁 + 极点内缩标签」生成。
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { politiesAtYear, polityById, eraAtYear } from '../../data/polities/index.js';
+import { chinaEventsOfYear, nearestChinaEvents, createEventCollector } from '../../data/china-events.js';
 import { buildPolityGeometries } from './territoryGen.js';
 
 // 时间轴范围：**先秦传说上限（约前 2700）** 至清亡前夜（1911）。
@@ -91,20 +92,42 @@ export function getPolityInfo(id, year, opts = {}) {
 }
 
 // 年份事件（时间轴年份读数点击时展示）
+// 口径：只列**这一年发生**的事，不跨年。数据来自两处——编年库
+// `data/china-events.js`（逐年铺开，主体）与朝代卡片自带的精选条目
+// （年代是概数，只取恰好等于本年的），按标题去重后合并。
 export function getChinaHistYearEvents(year) {
-  const acts = politiesAtYear(year);
-  if (!acts.length) {
-    return { title: `📜 ${fy(year)} · 暂无对应政权`, items: [] };
-  }
-  const items = acts.map((p) => ({
-    t: `${p.name}（${p.type === 'central' ? '中央' : '并立'}）`,
-    d: `都城：${p.seg.capital || p.capital || '—'}｜存续 ${fy(p.start)} – ${fy(p.end)}`,
-  }));
+  const y = Math.trunc(Number(year));
+  const acts = politiesAtYear(y);
   const central = acts.find((p) => p.type === 'central');
-  const era = eraAtYear(year);
-  const head = central ? `${central.name}朝` : (era ? era.name : '分裂时期');
+  const era = eraAtYear(y);
+  // "唐"要补成"唐朝"，但"东汉""北宋""曹魏"本来就通顺，再补一个"朝"成了"东汉朝"
+  const head = central
+    ? (central.name.length === 1 && !central.name.endsWith('朝') ? `${central.name}朝` : central.name)
+    : (era ? era.name : '分裂时期');
+
+  const col = createEventCollector();
+  for (const e of chinaEventsOfYear(y)) col.push(e.t, e.d, e.c);
+  for (const p of acts) {
+    for (const e of p.events || []) if (Math.trunc(e.year) === y) col.push(e.title, e.desc, e.cat);
+  }
+  const items = col.items;
+
+  const n = items.length;
+  if (!n) {
+    // 没有收录不等于没有事——至少交代"这一年是谁的天下"，
+    // 再把前后最近的条目递上来，读者才有位置感（不然只剩一句"暂无"）。
+    items.push({
+      t: '本年无确切纪事',
+      d: `存续政权：${acts.map((p) => p.name).join('、') || '—'}`,
+    });
+    const { prev, next } = nearestChinaEvents(y);
+    if (prev) items.push({ t: prev.t, d: prev.d, cat: prev.c, span: `在此之前 ${y - prev.y} 年` });
+    if (next) items.push({ t: next.t, d: next.d, cat: next.c, span: `${next.y - y} 年后` });
+  }
   return {
-    title: `📜 ${fy(year)} · ${head}（共 ${acts.length} 个政权）`,
+    title: n
+      ? `📜 ${fy(y)} · ${head}（当年 ${n} 件大事）`
+      : `📜 ${fy(y)} · ${head}（本年无确切纪事，附前后最近）`,
     items,
   };
 }

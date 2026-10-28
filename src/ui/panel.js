@@ -88,6 +88,14 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
   const tProvince = document.getElementById('toggle-province');
   const tPass = document.getElementById('toggle-pass');
   const tCity = document.getElementById('toggle-city');
+  // 第四幅图（中国近代史）专属开关
+  const tMFaction = document.getElementById('toggle-mfaction');
+  const tMEvent = document.getElementById('toggle-mevent');
+  const tMPort = document.getElementById('toggle-mport');
+  const tMRail = document.getElementById('toggle-mrail');
+  const tMConcession = document.getElementById('toggle-mconcession');
+  const tMSphere = document.getElementById('toggle-msphere');
+  const tMProvince = document.getElementById('toggle-mprovince');
   const resetBtn = document.getElementById('reset-view');
   const info = document.getElementById('info');
   const infoClose = document.getElementById('info-close');
@@ -116,6 +124,13 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
   tProvince?.addEventListener('change', () => onToggleLayer('provinceRef', tProvince.checked));
   tPass?.addEventListener('change', () => onToggleLayer('pass', tPass.checked));
   tCity?.addEventListener('change', () => onToggleLayer('city', tCity.checked));
+  tMFaction?.addEventListener('change', () => onToggleLayer('mfaction', tMFaction.checked));
+  tMEvent?.addEventListener('change', () => onToggleLayer('mevent', tMEvent.checked));
+  tMPort?.addEventListener('change', () => onToggleLayer('mport', tMPort.checked));
+  tMRail?.addEventListener('change', () => onToggleLayer('mrail', tMRail.checked));
+  tMConcession?.addEventListener('change', () => onToggleLayer('mconcession', tMConcession.checked));
+  tMSphere?.addEventListener('change', () => onToggleLayer('msphere', tMSphere.checked));
+  tMProvince?.addEventListener('change', () => onToggleLayer('mprovince', tMProvince.checked));
   // 「!」圆圈：把原先面板底部的数据来源说明收进弹层（面板本身保持干净）
   btnHelp?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -324,8 +339,19 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
       if (groupChina) groupChina.style.display = m === 'china' ? '' : 'none';
       const groupHist = document.getElementById('group-chinahist');
       if (groupHist) groupHist.style.display = m === 'chinaHist' ? '' : 'none';
-      // 战争卡独立成块：只有中国古代史模式需要（其他模式整块隐藏）
-      if (panelWar) panelWar.classList.toggle('hidden', m !== 'chinaHist');
+      const groupModern = document.getElementById('group-modern');
+      if (groupModern) groupModern.style.display = m === 'modern' ? '' : 'none';
+      // 近代史不用「历史疆域」这一项（控制区由「控制区」开关管），把这一行藏起来，
+      // 否则会出现一个勾了没反应、或看着像"疆域没显示"的死开关。
+      const tTerritoryRow = document.getElementById('toggle-territory')?.closest('label');
+      if (tTerritoryRow) tTerritoryRow.style.display = m === 'modern' ? 'none' : '';
+      // 战争卡独立成块：中国古代史 / 中国近代史两个模式都需要（其余模式整块隐藏）
+      if (panelWar) panelWar.classList.toggle('hidden', m !== 'chinaHist' && m !== 'modern');
+      // 近代史在这张卡里额外挂"年表 / 专题"两个入口；古代史只有战争，标题也退回"战争"
+      const warTools = document.getElementById('war-modern-tools');
+      if (warTools) warTools.classList.toggle('hidden', m !== 'modern');
+      const warTitle = document.getElementById('war-panel-title');
+      if (warTitle) warTitle.textContent = m === 'modern' ? '战争与叙事' : '战争';
     },
     // 由 main.setMode 在切换模式后调用：把图层默认同步到面板勾选框
     syncCheckboxes(state) {
@@ -334,6 +360,8 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
         riverLabel: tRiverLabel, mountain: tMountain, relief: tRelief, lake: tLake,
         basemapLand: tBasemap, zh: tZh, polity: tPolity, provinceRef: tProvince,
         pass: tPass, city: tCity,
+        mfaction: tMFaction, mevent: tMEvent, mport: tMPort, mrail: tMRail,
+        mconcession: tMConcession, msphere: tMSphere, mprovince: tMProvince,
       };
       for (const k in map) {
         const el = map[k];
@@ -456,6 +484,10 @@ export function createPanel({ onToggleLayer, onReset, onShowInfo, rulerName, onW
       const rows = [];
       for (const [k, v] of p.lines || []) {
         if (v) rows.push(`<div><span class="k">${k}：</span>${v}</div>`);
+      }
+      // 长文段落（近代史事件用）：卡片里按自然段排，段间留白，读起来不像一坨
+      for (const para of p.paras || []) {
+        if (para) rows.push(`<p class="card-p">${para}</p>`);
       }
       if (p.desc) rows.push(`<div><span class="k">简介：</span>${p.desc}</div>`);
       body.innerHTML = rows.join('');

@@ -172,9 +172,23 @@ export function buildCityLayers(o = {}) {
 // 点击箭头或交战图标都能弹出整场战争的背景卡。
 const clamp01 = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
 
+// 战争池选择：第三幅图用内置 WARS；第四幅图（近代史）传入自己的 MODERN_WARS。
+// 两份数据的展开结构完全同构（meta / parties / forces / battles），所以渲染逻辑
+// 不需要复制一遍 —— 只把"从哪取这场战争"这一个点参数化。
+function pickWars(year, focusWarId, pool) {
+  if (!pool) return activeWars(year, focusWarId);
+  const y = Number(year);
+  return pool.filter(
+    (w) =>
+      (!focusWarId || w.id === focusWarId) &&
+      y >= Math.floor(w.meta.start) &&
+      y <= Math.ceil(w.meta.end)
+  );
+}
+
 export function warPins(year, progress, o = {}) {
   if (!o.focusWarId) return [];
-  const ws = activeWars(year, o.focusWarId);
+  const ws = pickWars(year, o.focusWarId, o.wars);
   if (!ws.length) return [];
   const p = clamp01(progress);
   const out = [];
@@ -228,8 +242,9 @@ export function warPins(year, progress, o = {}) {
 // 在史料上只占 1 个月还是 3 年，回放时长都恒定，且不会因"年份跨度 < 最小跨度"
 // 让军队卡在半路（旧版就是因此停在中途）。
 export function buildWarLayers(year, progress, o = {}) {
-  const ws = activeWars(year, o.focusWarId);
+  const ws = pickWars(year, o.focusWarId, o.wars);
   if (!ws.length) return [];
+  const pre = o.layerPrefix || 'chinahist-war';
   const p = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
   const routes = [];
   for (const w of ws) {
@@ -256,7 +271,7 @@ export function buildWarLayers(year, progress, o = {}) {
   const layers = [
     // 完整行军路线（淡色，示意整体走向）
     new PathLayer({
-      id: 'chinahist-war-route-full',
+      id: pre + '-route-full',
       data: routes.filter((r) => !r.static),
       getPath: (d) => d.full,
       getColor: (d) => [d.color[0], d.color[1], d.color[2], 90],
@@ -268,7 +283,7 @@ export function buildWarLayers(year, progress, o = {}) {
     }),
     // 已行进路段（粗主干）
     new PathLayer({
-      id: 'chinahist-war-route-traveled',
+      id: pre + '-route-traveled',
       data: routes.filter((r) => !r.static && r.traveled.length > 1),
       getPath: (d) => d.traveled,
       getColor: (d) => [d.color[0], d.color[1], d.color[2], 240],
@@ -285,7 +300,7 @@ export function buildWarLayers(year, progress, o = {}) {
   if (routes.some((r) => r.label && r.head)) {
     layers.push(
       new TextLayer({
-        id: 'chinahist-war-force-label',
+        id: pre + '-force-label',
         data: routes.filter((r) => r.label && r.head),
         getPosition: (d) => d.head,
         getText: (d) => d.label,

@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>行军动画实验室 · 示意</title>
+<style>
+  :root{
+    --paper:#f4ecd9;
+    --paper-deep:#e7dcc3;
+    --ink:#3a2a18;
+    --ink-soft:#7a6550;
+    --card:rgba(255,251,242,.93);
+    --line:#d9c9a9;
+    --red:#b23a2a; --blue:#2f6f9f; --green:#3f7a4a; --orange:#c4771f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{
+    background:var(--paper-deep);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  #stage{position:absolute;inset:0}
+  svg#scene{width:100%;height:100%;display:block}
+
+  /* ── 控制卡 ───────────────────────────────────────── */
+  .hud{
+    position:absolute;top:18px;left:18px;width:236px;
+    background:var(--card);
+    border:1px solid rgba(190,168,132,.55);
+    border-radius:14px;padding:14px 15px 15px;
+    box-shadow:0 10px 30px rgba(92,68,36,.18), 0 1px 0 rgba(255,255,255,.7) inset;
+    backdrop-filter:blur(6px);
+    z-index:5;
+  }
+  .hud-title{font-size:15px;font-weight:800;letter-spacing:.5px}
+  .hud-sub{font-size:11px;color:var(--ink-soft);margin:3px 0 12px}
+  .hud-row{display:flex;gap:8px;margin-bottom:12px}
+  .btn{
+    flex:1;padding:8px 6px;border:1px solid #cdb894;border-radius:9px;
+    background:#fffdf7;color:var(--ink);font-size:13px;font-weight:700;
+    cursor:pointer;transition:.15s;font-family:inherit;
+  }
+  .btn:hover{background:#fff6e4;border-color:#b89a6c}
+  .btn.primary{background:#8f2f22;color:#fff9ef;border-color:#7a2318}
+  .btn.primary:hover{background:#a53a29}
+  .hud-label{font-size:11px;color:var(--ink-soft);margin:10px 0 6px;font-weight:700;letter-spacing:.4px}
+  .seg{display:flex;gap:4px}
+  .seg button{
+    flex:1;padding:5px 0;border:1px solid #d6c4a2;border-radius:7px;background:#fffdf7;
+    font-size:12px;cursor:pointer;color:#6b5842;font-family:inherit;transition:.12s;
+  }
+  .seg button.on{background:#4d3a22;color:#fff8ea;border-color:#4d3a22}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12.5px;margin:7px 0;cursor:pointer;color:#4a3823}
+  .chk input{accent-color:#8f2f22;width:14px;height:14px;cursor:pointer}
+
+  /* ── 图例 ─────────────────────────────────────────── */
+  .legend{
+    position:absolute;left:18px;bottom:18px;
+    background:var(--card);border:1px solid rgba(190,168,132,.55);
+    border-radius:12px;padding:11px 14px;font-size:12.5px;
+    box-shadow:0 8px 24px rgba(92,68,36,.15);
+    backdrop-filter:blur(6px);z-index:5;
+  }
+  .legend .lt{font-size:11px;color:var(--ink-soft);font-weight:700;margin-bottom:7px;letter-spacing:.4px}
+  .lg{display:flex;align-items:center;gap:8px;margin:5px 0;color:#46341f}
+  .lg i{width:20px;height:4px;border-radius:2px;display:inline-block}
+
+  /* ── SVG 元素 ─────────────────────────────────────── */
+  .river{fill:none;stroke:#a7c8d6;stroke-width:5;stroke-linecap:round;opacity:.55}
+  .river.thin{stroke-width:2.6;opacity:.4}
+  .hill{fill:#e6d7b6;opacity:.75}
+  .hill.deep{fill:#dfcda6;opacity:.8}
+
+  /* 未走路段不画：base 只作取点采样的几何载体（opacity:0 仍可 getTotalLength），
+     否则一开始整条路线就被一条淡线预告光了 */
+  .route-base{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+  .route-done{fill:none;stroke-width:5.6;stroke-linecap:round;stroke-linejoin:round;
+    filter:drop-shadow(0 1px 1px rgba(120,80,30,.25))}
+  .adv-head{filter:drop-shadow(0 0 1.6px #fff) drop-shadow(0 0 3px #fff) drop-shadow(0 2px 3px rgba(60,35,10,.45))}
+  .meet-star{filter:drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px rgba(180,60,35,.5)) drop-shadow(0 2px 4px rgba(80,30,10,.35))}
+  .tail-dot{}
+
+  .route-label{
+    font-size:13.5px;font-weight:800;letter-spacing:.4px;
+    paint-order:stroke;stroke:#fffdf5;stroke-width:4.5;stroke-linejoin:round;
+  }
+  .map-label{
+    font-size:13px;font-weight:700;fill:#5d4526;
+    paint-order:stroke;stroke:#fdf8ec;stroke-width:4;stroke-linejoin:round;
+  }
+
+  /* 起点脉冲 */
+  @keyframes pulse{
+    0%{transform:scale(.45);opacity:.75}
+    70%{opacity:0}
+    100%{transform:scale(2.6);opacity:0}
+  }
+  .pulse{transform-box:fill-box;transform-origin:center;animation:pulse 2.4s ease-out infinite}
+  .pulse.d2{animation-delay:.8s}
+  .pulse.d3{animation-delay:1.6s}
+
+  /* 到达 / 会师爆发 */
+  @keyframes burst{
+    0%{transform:scale(.15);opacity:0}
+    45%{transform:scale(1.18);opacity:1}
+    100%{transform:scale(1);opacity:1}
+  }
+  .arrive{transform-box:fill-box;transform-origin:center;opacity:0}
+  .arrive.on{animation:burst .5s cubic-bezier(.2,1.4,.5,1) both}
+
+  @keyframes ring{
+    0%{transform:scale(.3);opacity:.85}
+    75%{opacity:.25}
+    100%{transform:scale(1.9);opacity:0}
+  }
+  .meet-ring{transform-box:fill-box;transform-origin:center;opacity:0}
+  .meet-ring.on{animation:ring 2s ease-out infinite}
+
+  @media (max-width:720px){
+    .hud{width:186px;padding:11px 12px;top:10px;left:10px}
+    .legend{font-size:11.5px;padding:9px 11px;left:10px;bottom:10px}
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <svg id="scene" viewBox="0 0 1280 800" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <filter id="paperGrain">
+        <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+        <feColorMatrix type="saturate" values="0"/>
+      </filter>
+      <radialGradient id="vignette" cx="50%" cy="46%" r="72%">
+        <stop offset="55%" stop-color="#000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#5a4222" stop-opacity=".18"/>
+      </radialGradient>
+      <linearGradient id="landGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f7f0de"/>
+        <stop offset="1" stop-color="#efe4cb"/>
+      </linearGradient>
+    </defs>
+
+    <!-- 底图 -->
+    <rect x="0" y="0" width="1280" height="800" fill="url(#landGrad)"/>
+
+    <g id="terrain">
+      <!-- 高原 / 丘陵（示意，不是真实地形） -->
+      <path class="hill deep" d="M 60 120 C 180 84, 300 100, 360 156 C 418 210, 392 292, 306 316 C 220 340, 96 312, 58 250 C 34 210, 30 150, 60 120 Z"/>
+      <path class="hill" d="M 900 520 C 1010 486, 1128 508, 1180 572 C 1232 636, 1196 716, 1100 736 C 1004 756, 900 726, 872 664 C 852 620, 848 550, 900 520 Z"/>
+      <path class="hill" d="M 470 600 C 548 574, 626 590, 660 636 C 694 682, 662 736, 592 746 C 522 756, 456 730, 440 686 C 428 652, 436 616, 470 600 Z"/>
+      <path class="hill" d="M 700 210 C 760 186, 830 196, 862 232 C 894 268, 876 316, 824 330 C 772 344, 712 326, 694 292 C 680 264, 676 224, 700 210 Z"/>
+      <path class="hill deep" d="M 150 690 C 210 668, 276 682, 300 720 C 324 758, 288 792, 232 796 C 176 800, 126 780, 118 746 C 112 724, 126 700, 150 690 Z"/>
+
+      <!-- 河流（示意） -->
+      <path class="river" d="M -30 470 C 140 436, 236 512, 400 486 C 560 460, 660 386, 812 412 C 950 436, 1080 402, 1310 428"/>
+      <path class="river thin" d="M 520 -20 C 548 110, 486 200, 528 312 C 570 424, 668 486, 640 604 C 616 706, 560 748, 548 820"/>
+      <path class="river thin" d="M 940 -20 C 918 96, 968 180, 944 268 C 920 356, 856 404, 872 486"/>
+
+      <!-- 细网格（经纬示意） -->
+      <g stroke="#cbb894" stroke-width=".7" opacity=".28">
+        <path d="M 0 200 H 1280"/><path d="M 0 400 H 1280"/><path d="M 0 600 H 1280"/>
+        <path d="M 320 0 V 800"/><path d="M 640 0 V 800"/><path d="M 960 0 V 800"/>
+      </g>
+    </g>
+
+    <!-- 路线层 / 标记层 -->
+    <g id="routes"></g>
+    <g id="markers"></g>
+
+    <!-- 纸纹 + 暗角 -->
+    <rect x="0" y="0" width="1280" height="800" filter="url(#paperGrain)" opacity=".05"/>
+    <rect x="0" y="0" width="1280" height="800" fill="url(#vignette)"/>
+  </svg>
+</div>
+
+<div class="hud">
+  <div class="hud-title">行军动画实验室</div>
+  <div class="hud-sub">示意场景 · 与真实地理无关</div>
+
+  <div class="hud-row">
+    <button id="play" class="btn primary">▶ 播放</button>
+    <button id="replay" class="btn">↺ 重播</button>
+  </div>
+
+  <div class="hud-label">速度</div>
+  <div class="seg" id="speed">
+    <button data-v="0.5">0.5×</button>
+    <button data-v="1" class="on">1×</button>
+    <button data-v="2">2×</button>
+    <button data-v="4">4×</button>
+  </div>
+
+  <div class="hud-label">样式</div>
+  <label class="chk"><input type="checkbox" id="opt-head" checked> 领队大箭头</label>
+  <label class="chk"><input type="checkbox" id="opt-tail" checked> 行进尾迹</label>
+  <label class="chk"><input type="checkbox" id="opt-loop" checked> 自动循环</label>
+</div>
+
+<div class="legend">
+  <div class="lt">行军路线（示意）</div>
+  <div class="lg"><i style="background:#b23a2a"></i>中央红军 · 红一方面军</div>
+  <div class="lg"><i style="background:#2f6f9f"></i>红二方面军</div>
+  <div class="lg"><i style="background:#3f7a4a"></i>红四方面军</div>
+  <div class="lg"><i style="background:#c4771f"></i>红二十五军</div>
+  <div class="lg" style="margin-top:8px;color:#8a7357;font-size:11.5px">★ 会师　◎ 起点脉冲</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const $ = (s, r = document) => r.querySelector(s);
+
+  const gRoutes = $('#routes');
+  const gMarks = $('#markers');
+
+  function el(tag, attrs) {
+    const n = document.createElementNS(NS, tag);
+    if (attrs) for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  // ── Catmull-Rom 平滑：把控制点变成自然曲线，杜绝硬折线 ──────────────
+  function catmullRom(pts, seg) {
+    const out = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || pts[i + 1];
+      for (let j = 0; j < seg; j++) {
+        const t = j / seg, t2 = t * t, t3 = t2 * t;
+        out.push([
+          0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+          0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
+        ]);
+      }
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+
+  function dOf(pts) {
+    return 'M' + pts.map((p) => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' L ');
+  }
+
+  // 等距采样：一次 getTotalLength，之后全部自己插值，避免每帧多次 layout
+  function samplePath(path, n = 1100) {
+    const L = path.getTotalLength();
+    const arr = [];
+    for (let i = 0; i <= n; i++) {
+      const p = path.getPointAtLength((L * i) / n);
+      arr.push([p.x, p.y]);
+    }
+    return { L, arr, step: L / n };
+  }
+  function atPath(s, dist) {
+    const d = Math.max(0, Math.min(s.L, dist));
+    const f = d / s.step;
+    const i = Math.min(s.arr.length - 2, Math.floor(f));
+    const k = f - i;
+    const a = s.arr[i], b = s.arr[i + 1];
+    return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+  }
+  function angPath(s, dist) {
+    const a = atPath(s, Math.max(0, dist - 5));
+    const b = atPath(s, dist);
+    return (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+  }
+
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+  // ── 路线配置（抽象示意，形似长征多路北上）────────────────────────
+  // labelShift：接近终点时标签让位的方向，避免四路会合后注记堆成一团
+  const ROUTES = [
+    {
+      id: 'c1', name: '中央红军', color: '#b23a2a', delay: 0.0, dur: 6.4, labelShift: [36, -36],
+      pts: [[196, 652], [248, 608], [288, 566], [280, 522], [246, 492], [268, 452],
+            [320, 420], [386, 396], [428, 362], [426, 320], [398, 288], [432, 256],
+            [494, 240], [546, 214], [566, 178], [624, 158], [696, 146], [776, 136],
+            [854, 126], [912, 116], [946, 110]],
+    },
+    {
+      id: 'c2', name: '红二方面军', color: '#2f6f9f', delay: 0.9, dur: 5.8, labelShift: [-104, 8],
+      pts: [[1046, 566], [982, 544], [922, 512], [878, 472], [836, 432], [794, 402],
+            [754, 362], [712, 332], [690, 292], [672, 252], [690, 212], [726, 190]],
+    },
+    {
+      id: 'c3', name: '红四方面军', color: '#3f7a4a', delay: 1.5, dur: 5.4, labelShift: [42, 38],
+      pts: [[688, 634], [728, 590], [704, 548], [690, 506], [722, 466], [772, 434],
+            [812, 402], [832, 362], [812, 322], [792, 284], [812, 244], [846, 214]],
+    },
+    {
+      id: 'c4', name: '红二十五军', color: '#c4771f', delay: 2.1, dur: 4.6, labelShift: [-56, 46],
+      pts: [[368, 612], [410, 584], [440, 548], [452, 508], [436, 470], [458, 436],
+            [502, 412], [548, 382], [578, 346], [586, 306], [610, 272], [654, 250],
+            [702, 238], [752, 226], [792, 216]],
+    },
+  ];
+
+  const TAIL_STEP = 6.5; // 尾迹点间距（紧贴队头，只做一点速度残影，不做长尾巴）
+  const TAIL_N = 7;
+
+  // ── 逐条构建 ──────────────────────────────────────────────────
+  const built = [];
+  let finishT = 0;
+
+  for (const cfg of ROUTES) {
+    const smooth = catmullRom(cfg.pts, 26);
+
+    const base = el('path', { d: dOf(smooth), class: 'route-base', stroke: cfg.color });
+    gRoutes.appendChild(base);
+
+    const done = el('path', { d: dOf(smooth), class: 'route-done', stroke: cfg.color });
+    gRoutes.appendChild(done);
+
+    const sample = samplePath(base);
+
+    // 尾迹点
+    const tails = [];
+    for (let i = 0; i < TAIL_N; i++) {
+      const dot = el('circle', { r: 3, fill: cfg.color, opacity: '0', class: 'tail-dot', stroke: '#fffaf0', 'stroke-width': '0.9' });
+      gRoutes.appendChild(dot);
+      tails.push(dot);
+    }
+
+    // 领队大箭头（指向 +x，用 rotate 对准行进方向）
+    const head = el('g', { class: 'adv-head' });
+    const headPath = el('path', {
+      d: 'M 24 0 L -2 -9.5 L 2.6 0 L -2 9.5 Z',
+      fill: cfg.color,
+      stroke: '#fffaf0',
+      'stroke-width': '1.4',
+      'stroke-linejoin': 'round',
+    });
+    head.appendChild(headPath);
+    gRoutes.appendChild(head);
+
+    // 队伍名（不随箭头旋转，固定在队头上方）
+    const label = el('text', {
+      class: 'route-label',
+      fill: cfg.color,
+      'text-anchor': 'middle',
+    });
+    label.textContent = cfg.name;
+    gMarks.appendChild(label);
+
+    // 起点：圆点 + 脉冲
+    const [sx, sy] = cfg.pts[0];
+    gMarks.appendChild(el('circle', { cx: sx, cy: sy, r: 9, fill: 'none', stroke: cfg.color, 'stroke-width': 2, class: 'pulse', opacity: '.8' }));
+    gMarks.appendChild(el('circle', { cx: sx, cy: sy, r: 4.6, fill: cfg.color, stroke: '#fffaf0', 'stroke-width': 1.8 }));
+
+    built.push({ cfg, sample, done, tails, head, label });
+    finishT = Math.max(finishT, cfg.delay + cfg.dur);
+  }
+
+  // ── 会师点：五角星（所有部队到齐后弹入）─────────────────────
+  // 注意：外层 g 只负责 translate，内层 g 才挂 .arrive 动画 ——
+  // CSS keyframes 里的 transform:scale 会整条覆盖 attribute 的 translate，
+  // 两层不分开的话，星会瞬间跳到画布原点。
+  function starPath(R, r, points = 5) {
+    const pts = [];
+    for (let i = 0; i < points * 2; i++) {
+      const a = (-90 + (i * 180) / points) * (Math.PI / 180);
+      const rad = i % 2 === 0 ? R : r;
+      pts.push([rad * Math.cos(a), rad * Math.sin(a)]);
+    }
+    return 'M' + pts.map((p) => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' L ') + ' Z';
+  }
+
+  const MEET = [868, 164];
+  const meetRing = el('circle', { cx: MEET[0], cy: MEET[1], r: 32, fill: 'none', stroke: '#8f2f22', 'stroke-width': 2.4, class: 'meet-ring' });
+  gMarks.appendChild(meetRing);
+
+  const meetWrap = el('g', { transform: `translate(${MEET[0]} ${MEET[1]})` });
+  const meetStar = el('g', { class: 'arrive meet-star' });
+  meetStar.appendChild(el('path', {
+    d: starPath(26, 10),
+    fill: '#bf3a24',
+    stroke: '#fff8ea',
+    'stroke-width': '2.2',
+    'stroke-linejoin': 'round',
+  }));
+  meetWrap.appendChild(meetStar);
+  gMarks.appendChild(meetWrap);
+
+  // ── 状态 / 渲染 ───────────────────────────────────────────────
+  const state = {
+    t: 0,
+    playing: false,
+    speed: 1,
+    head: true,
+    tail: true,
+    loop: true,
+  };
+
+  const HOLD = 1.6;              // 全部到位后的停留
+  const CYCLE = finishT + HOLD;
+  // 整体节奏：1× 的体感 = 早期版 0.5×。要再慢就把这个数调大（2→2.5→3）
+  const PACE = 2;
+
+  function render(t) {
+    for (const r of built) {
+      const p = clamp01((t - r.cfg.delay) / r.cfg.dur);
+      const e = easeInOut(p);
+      const len = r.sample.L * e;
+
+      r.done.style.strokeDasharray = `${len.toFixed(1)} ${(r.sample.L + 6).toFixed(1)}`;
+
+      const pt = atPath(r.sample, len);
+      const ang = angPath(r.sample, len);
+
+      // 大箭头
+      if (state.head && p > 0.002) {
+        r.head.style.display = '';
+        r.head.setAttribute('transform', `translate(${pt[0].toFixed(1)} ${pt[1].toFixed(1)}) rotate(${ang.toFixed(1)})`);
+      } else {
+        r.head.style.display = 'none';
+      }
+
+      // 队伍名：途中居队头上方；接近终点时按 labelShift 让位，避免四路注记堆叠
+      if (p > 0.02) {
+        r.label.style.display = '';
+        const sh = r.cfg.labelShift || [0, -32];
+        const k = clamp01((p - 0.68) / 0.32);
+        const lx = pt[0] + sh[0] * k;
+        const ly = pt[1] - 32 + (sh[1] + 32) * k;
+        r.label.setAttribute('x', lx.toFixed(1));
+        r.label.setAttribute('y', ly.toFixed(1));
+      } else {
+        r.label.style.display = 'none';
+      }
+
+      // 尾迹：途中显示，到站即清空（停下来还留一串点很脏）
+      if (state.tail && p > 0.01 && p < 0.999) {
+        for (let i = 0; i < r.tails.length; i++) {
+          const d2 = len - (i + 1) * TAIL_STEP;
+          if (d2 < 2) { r.tails[i].style.display = 'none'; continue; }
+          const tp = atPath(r.sample, d2);
+          const f = 1 - i / r.tails.length;
+          r.tails[i].setAttribute('cx', tp[0].toFixed(1));
+          r.tails[i].setAttribute('cy', tp[1].toFixed(1));
+          r.tails[i].setAttribute('r', (0.9 + 2.4 * f).toFixed(2));
+          r.tails[i].setAttribute('opacity', (0.03 + 0.16 * f).toFixed(2));
+          r.tails[i].style.display = '';
+        }
+      } else {
+        for (const d of r.tails) d.style.display = 'none';
+      }
+    }
+
+    const allDone = built.every((r) => clamp01((t - r.cfg.delay) / r.cfg.dur) >= 0.999);
+    meetStar.classList.toggle('on', allDone);
+    meetRing.classList.toggle('on', allDone);
+  }
+
+  // ── 时钟 ──────────────────────────────────────────────────────
+  let last = 0;
+  function frame(ts) {
+    if (!last) last = ts;
+    const dt = Math.min(0.06, (ts - last) / 1000);
+    last = ts;
+
+    if (state.playing) {
+      state.t += (dt * state.speed) / PACE;
+      if (state.t > CYCLE) {
+        if (state.loop) state.t = 0;
+        else { state.t = CYCLE; state.playing = false; syncPlayBtn(); }
+      }
+    }
+    render(state.t);
+    requestAnimationFrame(frame);
+  }
+
+  // ── 控件 ──────────────────────────────────────────────────────
+  const playBtn = $('#play');
+  function syncPlayBtn() {
+    playBtn.textContent = state.playing ? '⏸ 暂停' : '▶ 播放';
+  }
+  playBtn.addEventListener('click', () => {
+    if (state.t >= CYCLE - 0.01) state.t = 0;
+    state.playing = !state.playing;
+    syncPlayBtn();
+  });
+  $('#replay').addEventListener('click', () => {
+    state.t = 0;
+    state.playing = true;
+    syncPlayBtn();
+  });
+
+  $('#speed').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    state.speed = parseFloat(b.dataset.v);
+    for (const x of $('#speed').children) x.classList.toggle('on', x === b);
+  });
+
+  $('#opt-head').addEventListener('change', (e) => { state.head = e.target.checked; });
+  $('#opt-tail').addEventListener('change', (e) => { state.tail = e.target.checked; });
+  $('#opt-loop').addEventListener('change', (e) => { state.loop = e.target.checked; });
+
+  // 初始停在行进中段，便于观察静态构图；?t=0.3 可指定任意进度（调试/分享单帧）
+  const urlT = parseFloat(new URLSearchParams(location.search).get('t'));
+  state.t = Number.isFinite(urlT) ? CYCLE * clamp01(urlT) : CYCLE * 0.62;
+  render(state.t);
+  syncPlayBtn();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

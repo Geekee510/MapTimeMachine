@@ -35,7 +35,13 @@ const SIMPLIFY_EPS = 0.04; // ~4km，低容差：去锯齿但保形
 const MIN_OUTLINE_AREA = 0.015;
 const MAX_RING_COMPACTNESS = 400;
 
-// 按「政权 id + 切片起始年」缓存：同一政权不同时间切片的疆域不同，不能混用。
+// 按「命名空间 + 政权 id + 切片起始年」缓存：同一政权不同时间切片的疆域不同，不能混用。
+//
+// 命名空间（ctx.ns）是为第四幅图加的：近代史的实体 id 里也有 'qing'，
+// 而古代史的 `qing`（1644–1912）与近代史的 `qing`（1840–1912）切片完全不同。
+// 两者若共用缓存键 'qing@1840'，先算的那份几何会被另一幅图直接拿去用 ——
+// 地图上会出现"清朝疆域按唐朝切片拼"这种无法从数据里看出来的错。
+// 所以键里必须带 ns；不传 ns 时保持原行为（第三幅图不受影响）。
 const _cache = new Map();
 
 export function clearTerritoryCache() {
@@ -160,13 +166,67 @@ function buildOutline(features) {
 //
 // 南边界从西端(阿尔泰附近)沿国界到东端(满洲里附近)，再由一条北向弧线闭合。
 const MONGOLIA_WEST = [87.75, 49.15];  // 中蒙俄西端三国交界（阿尔泰）
-const MONGOLIA_EAST = [119.90, 46.65]; // 中蒙东端（阿尔山附近）
-// 北向弧线：东端 → 肯特山 → 色楞格 → 库苏古尔 → 唐努乌梁海 → 西端（示意）
+// 东端必须取到**满洲里**（中蒙俄东端三国交界），不能取蒙古最东的 119.9°：
+// 若只画到 119.9,46.65 就用弧线直接拉回北边，弧线会横穿呼伦贝尔（实测在
+// 117°E、48°N 一带与内蒙古省界重叠，渲染成一块深色斑）。沿着中蒙边界走完
+// 那一段"东部凸出"，再用蒙俄边界闭合，才既不重叠也不缺角。
+const MONGOLIA_EAST = [117.80, 49.55];
+// 北向弧线：满洲里 → 肯特山 → 色楞格 → 库苏古尔 → 唐努乌梁海 → 西端（示意）
+//
+// 西段为什么抬到 52.5°：早年这条弧线整段压在南纬 50° 附近，等于只画了今蒙古国
+// 的一半 —— 蒙古西北（库苏古尔）本就到 51.5°，其北的**唐努乌梁海**（今图瓦，
+// 清属乌里雅苏台将军辖区，1914 年被沙俄吞并）更到 53°。清末疆域图上"西北角
+// 缺一块"就是这里造成的。
 const MONGOLIA_NORTH_ARC = [
-  [120.20, 47.60], [119.20, 48.60], [117.60, 49.50], [116.00, 50.10],
-  [114.20, 50.30], [112.00, 50.05], [110.00, 49.60], [107.60, 49.90],
-  [104.60, 50.40], [101.60, 50.85], [98.60, 50.55], [95.80, 50.10],
-  [93.20, 50.60], [90.60, 50.25], [88.60, 49.75],
+  [116.80, 49.95], [115.60, 50.05], [114.20, 50.30], [112.00, 50.05],
+  [110.00, 49.60], [107.60, 49.90],
+  [104.60, 50.40], [101.60, 50.95], [99.40, 51.10], [97.20, 51.55],
+  [95.80, 52.15], [94.20, 52.55], [92.60, 52.20], [91.00, 51.30],
+  [89.60, 50.60], [88.60, 49.75],
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 'outer-manchuria' —— 外东北（黑龙江以北、乌苏里江以东 + 库页岛）
+//   1689《尼布楚》以后属清，1858《瑷珲》/1860《北京》两约割与沙俄，共约 100 万 km²。
+//   南/西界同样取自国界轮廓：漠河 → 沿黑龙江至抚远 → 沿乌苏里江南下至图们江口。
+//   北/东界走外兴安岭（斯塔诺夫山脉）与日本海西岸。
+const MANCHURIA_WEST = [122.35, 53.50]; // 漠河（额尔古纳河与黑龙江汇流处）
+const MANCHURIA_EAST = [130.62, 42.40]; // 图们江入海口
+// 图们江口 → 海参崴 → 日本海西岸 → 庙街（黑龙江口）→ 外兴安岭 → 漠河
+const MANCHURIA_NORTH_ARC = [
+  [130.95, 42.62], [131.45, 42.85], [131.95, 43.12], [132.90, 43.20],
+  [134.20, 43.50], [135.60, 44.00], [136.90, 44.70], [138.10, 45.70],
+  [139.40, 47.10], [140.10, 48.60], [140.60, 50.00], [141.10, 51.50],
+  [141.20, 52.60], [140.65, 53.35], [139.20, 54.10], [137.00, 54.60],
+  [134.50, 54.55], [132.00, 54.25], [129.20, 53.90], [126.30, 53.65],
+  [124.20, 53.55],
+];
+// 库页岛（今萨哈林州，清属三姓副都统辖下；1860 年随外东北一并失去）
+const SAKHALIN_RING = [
+  [142.05, 54.28], [142.75, 54.36], [143.30, 53.50], [143.05, 52.55],
+  [142.75, 51.55], [143.15, 50.60], [142.85, 49.55], [142.55, 48.50],
+  [142.25, 47.50], [141.95, 46.55], [141.85, 45.95], [142.15, 45.92],
+  [142.60, 46.65], [143.05, 47.55], [143.35, 48.60], [143.45, 49.60],
+  [143.60, 50.50], [143.65, 51.55], [143.45, 52.55], [143.65, 53.35],
+  [143.10, 54.20], [142.55, 54.45], [142.05, 54.28],
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 'balkhash' —— 巴尔喀什湖以东以南（塔尔巴哈台、伊犁西路、七河、伊塞克湖）
+//   1864《勘分西北界约记》割与沙俄约 44 万 km²；1881《伊犁条约》又失霍尔果斯以西。
+//   东界取国界轮廓（阿尔泰 → 阿拉山口 → 霍尔果斯 → 帕米尔），西界沿巴尔喀什湖东岸、
+//   楚河、塔拉斯、费尔干纳东缘闭合。
+const BALKHASH_NORTH = [87.30, 49.15]; // 奎屯山（中哈俄蒙四至点附近）
+const BALKHASH_SOUTH = [73.60, 39.45]; // 帕米尔（中塔阿交界）
+// 帕米尔 → 费尔干纳东缘 → 塔拉斯 → 楚河 → 巴尔喀什湖东岸 → 斋桑泊 → 阿尔泰
+// 费尔干纳两点贴到 73° 附近：浩罕城（Kokand，73.0,40.5）是浩罕汗国的都城，
+// 属藩部而非清朝直辖，边界不该把它圈进来。
+const BALKHASH_WEST_ARC = [
+  [73.90, 39.75], [73.30, 40.30], [72.80, 40.90], [72.55, 41.45],
+  [73.10, 42.20], [72.60, 42.95], [71.90, 43.60], [72.40, 44.35],
+  [73.60, 45.10], [75.00, 45.85], [75.90, 46.60], [76.40, 47.20],
+  [78.20, 47.55], [80.50, 47.65], [82.60, 47.90], [84.40, 48.40],
+  [86.10, 48.90],
 ];
 
 let _nationalRing = null;   // 中国国界轮廓（简化后，主环）
@@ -224,29 +284,41 @@ function borderChain(ring, west, east) {
   return dWest <= dEast ? chain : chain.slice().reverse();
 }
 
-function mongoliaPatch(provinceFeatures) {
-  if (_patchCache.has('mongolia')) return _patchCache.get('mongolia');
+// 通用拼环：国界上 west→east 那一段（与省界共享顶点）+ 弧线（east→west）+ 闭合。
+// 返回**环数组**：多数补丁是一块，库页岛这种离岸岛屿要额外给一个独立环。
+function stitchedPatch(name, provinceFeatures, west, east, arc, extraRings = []) {
+  if (_patchCache.has(name)) return _patchCache.get(name);
   if (!provinceFeatures) return null;
   const ring = nationalRing(provinceFeatures);
   if (!ring) return null;
-  const chain = borderChain(ring, MONGOLIA_WEST, MONGOLIA_EAST);
+  const chain = borderChain(ring, west, east);
   if (chain.length < 2) return null;
-  // 补丁环 = 国界北段（与省界共享顶点）+ 北向弧线（东→西）+ 回到起点
   const out = chain.slice();
-  for (const p of MONGOLIA_NORTH_ARC) out.push(p);
+  for (const p of arc) out.push(p);
   out.push([chain[0][0], chain[0][1]]);
-  _patchCache.set('mongolia', out);
-  return out;
+  const rings = [out, ...extraRings];
+  _patchCache.set(name, rings);
+  return rings;
 }
 
-const PATCH_RESOLVERS = { mongolia: mongoliaPatch };
+const PATCH_RESOLVERS = {
+  mongolia: (pf) =>
+    stitchedPatch('mongolia', pf, MONGOLIA_WEST, MONGOLIA_EAST, MONGOLIA_NORTH_ARC),
+  'outer-manchuria': (pf) =>
+    stitchedPatch(
+      'outer-manchuria', pf, MANCHURIA_WEST, MANCHURIA_EAST,
+      MANCHURIA_NORTH_ARC, [SAKHALIN_RING]
+    ),
+  balkhash: (pf) =>
+    stitchedPatch('balkhash', pf, BALKHASH_NORTH, BALKHASH_SOUTH, BALKHASH_WEST_ARC),
+};
 
 // 主入口。
 //   polity —— 统一政权对象（src/data/polities）
 //   seg    —— 该年份生效的时间切片
 //   ctx    —— { provinceFeatures, preqinFeatures }
 export function buildPolityGeometries(polity, seg, ctx = {}) {
-  const cacheKey = `${polity.id}@${seg?.start ?? 'na'}`;
+  const cacheKey = `${ctx.ns || ''}|${polity.id}@${seg?.start ?? 'na'}`;
   const cached = _cache.get(cacheKey);
   if (cached) return cached;
 
@@ -273,15 +345,28 @@ export function buildPolityGeometries(polity, seg, ctx = {}) {
     if (!Array.isArray(ring) || ring.length < 3) continue;
     features.push({
       type: 'Feature',
+      // patch 标记供渲染层区分：补丁按现代国界拼环，难免与省界有一小段重叠，
+      // 同色叠两次会显出一块更深的色斑（近代 1840 年东北就踩过），渲染时降透明度。
+      properties: { patch: true },
       geometry: { type: 'Polygon', coordinates: [chaikin(ring, 4)] },
     });
   }
 
-  // 2b) 具名补丁（蒙古）：与省界共享边界的拼环，无需磨圆也无需再消缝
+  // 2b) 具名补丁（外蒙古、外东北、巴尔喀什）：与省界共享边界的拼环，
+  //     无需磨圆也无需再消缝。resolver 可以返回一个环，也可以返回环数组
+  //     （库页岛是离岸岛，必须单列一个环，否则会和大陆环连成一条假地峡）。
   for (const key of seg?.patchKeys || []) {
-    const ring = PATCH_RESOLVERS[key]?.(provinceFeatures);
-    if (!ring || ring.length < 4) continue;
-    features.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] } });
+    const res = PATCH_RESOLVERS[key]?.(provinceFeatures);
+    if (!Array.isArray(res) || !res.length) continue;
+    const rings = typeof res[0]?.[0] === 'number' ? [res] : res;
+    for (const ring of rings) {
+      if (!ring || ring.length < 4) continue;
+      features.push({
+        type: 'Feature',
+        properties: { patch: true, patchKey: key },
+        geometry: { type: 'Polygon', coordinates: [ring] },
+      });
+    }
   }
 
   // 3) 外部真实几何（夏/西周）

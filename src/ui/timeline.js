@@ -44,16 +44,29 @@ export function createTimeline({ min, max, value, onYear, onPlayToggle, getYearE
     let info = getYearEvents ? getYearEvents(y) : null;
     if (!info) info = { title: `🌍 ${fmtYear(y)} 年 · 世界大事`, items: getWorldEvents(y) };
     const items = info.items || [];
+    const ongoing = info.ongoing || [];
+    // 分类徽标：政(蓝)/外(青)/战(红)/经(绿)/文(黄)/科(紫)，与世界模式同一套写法。
+    // 缺 cat 的条目（如世界大事）不画徽标，靠左侧竖线区分即可。
+    const li = (e, on) => {
+      const catBadge = e.cat ? `<span class="we-cat cat-${e.cat}">${e.cat}</span>` : '';
+      const span = e.span ? `<span class="we-span">${e.span}</span>` : '';
+      return `<li${on ? ' class="we-on"' : ''}><div class="we-title">${catBadge}${e.t}${span}</div>${e.d ? `<div class="we-desc">${e.d}</div>` : ''}</li>`;
+    };
     let html = `<div class="we-head">${info.title}</div>`;
     if (items.length) {
       html += '<ul class="we-list">';
-      for (const e of items) {
-        const catBadge = e.cat ? `<span class="we-cat cat-${e.cat}">${e.cat}</span> ` : '';
-        html += `<li><div class="we-title">${catBadge}${e.t}</div>${e.d ? `<div class="we-desc">${e.d}</div>` : ''}</li>`;
-      }
+      for (const e of items) html += li(e);
       html += '</ul>';
-    } else {
+    } else if (!ongoing.length) {
       html += '<div class="we-empty">该年份暂无收录内容</div>';
+    }
+    // 跨年未结束的事件单列一段：它们不是"本年发生的事"，
+    // 混进主列表会让人误以为鸦片战争是 1841 年爆发的。
+    if (ongoing.length) {
+      html += `<div class="we-sub">本年仍在进行<span class="we-n">${ongoing.length}</span></div>`;
+      html += '<ul class="we-list we-list-ongoing">';
+      for (const e of ongoing) html += li(e, true);
+      html += '</ul>';
     }
     html += '<div class="we-foot">再次点击年份可关闭</div>';
     worldBox.innerHTML = html;

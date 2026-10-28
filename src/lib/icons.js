@@ -92,7 +92,16 @@ const CLASH = `
   </g>
 </svg>`;
 
-const ICONS = { pass: TOWER, battle: CLASH, clash: CLASH, tri: TRI, rider: TRI };
+// 近代史事件：圆形徽记（阵营色由 --pin-color 给），中心一枚浅色圆心。
+// 不做成具体物象（旗帜、炸弹之类）是因为事件类型太杂：一场起义、一次条约签订、
+// 一次会议都可能是同一个点，抽象圆徽反而不会误读；颜色承担"分组"（晚清/军阀/红军/抗战/解放）。
+const EVENT = `
+<svg viewBox="0 0 32 32" width="25" height="25" aria-hidden="true">
+  <circle cx="16" cy="16" r="10.2" fill="var(--pin-color, #b23c34)" stroke="#2a1a0b" stroke-width="1.9"/>
+  <circle cx="16" cy="16" r="4.1" fill="#fff6e6"/>
+</svg>`;
+
+const ICONS = { pass: TOWER, battle: CLASH, clash: CLASH, tri: TRI, rider: TRI, event: EVENT };
 
 export function pinIcon(kind) {
   return ICONS[kind] || TOWER;
