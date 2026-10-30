@@ -8,7 +8,7 @@ import { zhCountry, zh, RIVER_ZH, MOUNTAIN_ZH, HB_ZH_VALUES } from './data/i18n.
 import { polityDesc, fallbackDesc, regionOf } from './data/polity-desc.js';
 import { DYNASTIES, getDynastyAtYear, statesAtYear } from './data/china.js';
 import { chinaEventsOfYear, nearestChinaEvents, createEventCollector } from './data/china-events.js';
-import { dissolveFeatures } from './lib/geo.js';
+import { dissolveFeatures, simplifyGeometry } from './lib/geo.js';
 import { clearTerritoryCache } from './modes/chinaHist/territoryGen.js';
 import { getWorldEvents } from './data/worldEvents.js';
 import { createTimeline } from './ui/timeline.js';
@@ -155,7 +155,7 @@ const layersState = { territory: true, outline: false, region: false, relief: fa
 const MODE_LAYER_DEFAULTS = {
   world:     { territory: true,  outline: false, region: false, relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true, mfaction: false, mevent: false, mport: false, mrail: false, mconcession: false, msphere: false, mprovince: false },
   china:     { territory: true,  outline: true,  region: true,  relief: false, river: true,  riverLabel: true,  mountain: true,  lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true, mfaction: false, mevent: false, mport: false, mrail: false, mconcession: false, msphere: false, mprovince: false },
-  chinaHist: { territory: true,  outline: false, region: false, relief: true,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: true,  city: true,  zh: true, mfaction: false, mevent: false, mport: false, mrail: false, mconcession: false, msphere: false, mprovince: false },
+  chinaHist: { territory: true,  outline: false, region: false, relief: false,  river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: true,  provinceRef: true,  pass: true,  city: true,  zh: true, mfaction: false, mevent: false, mport: false, mrail: false, mconcession: false, msphere: false, mprovince: false },
   // 近代史默认关地形晕渲：控制区颜色本身就偏灰（清=土黄、民国=蓝灰），
   // 底下再叠一层山体阴影会把它们冲成同一片灰绿，政权差别读不出来。
   modern:    { territory: false, outline: false, region: false, relief: false, river: true,  riverLabel: false, mountain: false, lake: false, basemapLand: false, polity: false, provinceRef: false, pass: false, city: false, zh: true, mfaction: true,  mevent: true,  mport: true,  mrail: true,  mconcession: false, msphere: false, mprovince: true },
@@ -169,6 +169,8 @@ let chinaProvinces = null; // 当代省级地图底板（DataV GeoJSON，运行�
 let chinaProvincesLoaded = false; // 是否已触发过省界加载（懒加载，仅一次）
 let chinaPreqin = null; // china_preqin.geojson：夏/西周的真实几何（historical-basemaps，CC BY-SA）
 let chinaPreqinLoaded = false; // 是否已触发过先秦几何加载（懒加载，仅一次）
+let cshapesLoaded = false; // 是否已触发过世界疆域(CShapes 26MB)加载（懒加载，仅世界模式）
+let chinaHistDataLoaded = false; // 是否已触发过中国历代数据(轮廓/政区/朝代)加载（懒加载，仅中国疆域/古代史模式）
 let chinaInfoOpen = false; // 中国模式信息卡是否打开（拖动年份时联动刷新）
 let histInfoOpen = false; // 第三模式（中国古代史）信息卡是否打开
 let histLastPolityId = null; // 当前展示的政权 id（年份拖动时刷新该卡）
@@ -247,36 +249,56 @@ function reliefAlpha(a) {
 // 用 Amazon Terrain Tiles 的 terrarium 编码 DEM 做 MapLibre hillshade，
 // 喜马拉雅、安第斯、阿尔卑斯、天山、昆仑等山脉的起伏都能真实呈现
 // （Natural Earth 的山脉点只有 219 个小山丘，没有主山系；OSM Overpass 拉取 mountain_range 又超时）。
+let reliefFailed = false; // 地形晕渲一旦在当前 GPU/驱动下渲染失败（Intel 集显常见 framebuffer 崩溃），永久关闭，避免反复重试拖累整个 WebGL 管线
 const DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 function applyRelief() {
   if (!map || !map.isStyleLoaded()) return;
+  // 一旦地形晕渲渲染失败，永久关闭并在已存在时隐藏，防止再次触发崩溃循环
+  if (reliefFailed) {
+    try { if (map.getLayer('hillshade')) map.setLayoutProperty('hillshade', 'visibility', 'none'); } catch (_) {}
+    return;
+  }
   const show = !!layersState.relief;
   try {
-    if (!map.getSource('dem')) {
-      map.addSource('dem', {
-        type: 'raster-dem',
-        tiles: [DEM_TILES],
-        encoding: 'terrarium',
-        tileSize: 256,
-        maxzoom: 12,
-        attribution: '地形：Mapzen / Amazon Terrain Tiles',
-      });
-    }
-    if (!map.getLayer('hillshade')) {
-      map.addLayer({
-        id: 'hillshade',
-        type: 'hillshade',
-        source: 'dem',
-        paint: {
-          'hillshade-exaggeration': 0.6,
-          'hillshade-shadow-color': '#4a3524',
-          'hillshade-highlight-color': '#f2ece2',
-          'hillshade-accent-color': '#7d5c3c',
-        },
-      });
-    }
-    if (map.getLayer('hillshade')) {
-      map.setLayoutProperty('hillshade', 'visibility', show ? 'visible' : 'none');
+    if (show) {
+      if (!map.getSource('dem')) {
+        map.addSource('dem', {
+          type: 'raster-dem',
+          tiles: [DEM_TILES],
+          encoding: 'terrarium',
+          tileSize: 256,
+          maxzoom: 12,
+          attribution: '地形：Mapzen / Amazon Terrain Tiles',
+        });
+        const dem = map.getSource('dem');
+        if (dem && !dem._reliefErrBound) {
+          dem._reliefErrBound = true;
+          dem.on('error', () => {
+            reliefFailed = true;
+            try { if (map.getLayer('hillshade')) map.setLayoutProperty('hillshade', 'visibility', 'none'); } catch (_) {}
+            console.warn('[relief] 地形晕渲在当前 GPU/驱动下渲染失败，已自动关闭以避免地图崩溃。');
+          });
+        }
+      }
+      if (!map.getLayer('hillshade')) {
+        map.addLayer({
+          id: 'hillshade',
+          type: 'hillshade',
+          source: 'dem',
+          paint: {
+            'hillshade-exaggeration': 0.6,
+            'hillshade-shadow-color': '#4a3524',
+            'hillshade-highlight-color': '#f2ece2',
+            'hillshade-accent-color': '#7d5c3c',
+          },
+        });
+      }
+      map.setLayoutProperty('hillshade', 'visibility', 'visible');
+    } else {
+      // 关闭：彻底移除地形图层与源，避免后台拉取 DEM 瓦片
+      //（s3 地形瓦片在国内常慢/被墙，且占显存；默认所有模式均关闭）
+      if (map.getLayer('hillshade')) map.removeLayer('hillshade');
+      if (map.getSource('dem')) map.removeSource('dem');
     }
   } catch (e) {
     console.warn('[relief] 地形晕渲图层不可用：', e.message);
@@ -372,9 +394,19 @@ function isPolityName(name) {
 // 加载后缓存，并预取相邻年代，使拖动时间轴时不卡顿（参考 orbis-chronos 的优化经验）。
 const hbCache = new Map(); // 快照年份 -> features
 const hbPending = new Set();
+const hbFailed = new Set(); // 加载失败的年份：避免对（被墙/超时的）境外 CDN 无限重试
+// 网络恢复后清掉失败标记，使之后再进入该年代能重新尝试拉取
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => hbFailed.clear());
+}
 
 async function ensureHb(year) {
-  if (hbCache.has(year) || hbPending.has(year)) return;
+  if (hbCache.has(year) || hbPending.has(year) || hbFailed.has(year)) return;
+  // 离线时直接放弃，不发起请求（否则每次重绘都会触发一次失败重试，拖慢主线程）
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    hbFailed.add(year);
+    return;
+  }
   hbPending.add(year);
   const url = `https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/${hbFileName(year)}.geojson`;
   try {
@@ -423,7 +455,10 @@ async function ensureHb(year) {
     }
     updateLayers(); // 数据到位后刷新（此时缓存已有，不会重复触发加载）
   } catch (e) {
-    console.warn(`[hb] ${year} 年快照加载失败：`, e.message);
+    // 记入失败集合，停止对该年份的反复重试：jsDelivr 在国内常被墙/超时，
+    // 不拦截会变成"每次 updateLayers 都打一次失败请求"的重试风暴，加剧卡顿
+    hbFailed.add(year);
+    console.warn(`[hb] ${year} 年快照加载失败（已记入失败缓存，不再自动重试）：`, e.message);
   } finally {
     hbPending.delete(year);
   }
@@ -714,14 +749,14 @@ const LABEL_FONT_FAMILY =
 // 译名表扩充到 4400+ 条后字符集已达 800+，原先 fontSize:128/buffer:8 会让图集高 32768，
 // 直接超限。故按字符集大小自适应选字号，保证图集高度 ≤ 8192。
 // 上限取「8192」与「本机 GPU 实际 MAX_TEXTURE_SIZE」的较小值（不同机器差异很大）。
-let maxAtlasHeight = 8192;
+let maxAtlasHeight = 2048;
 function detectMaxAtlasHeight() {
   try {
     const c = document.createElement('canvas');
     const gl = c.getContext('webgl2') || c.getContext('webgl');
     if (gl) {
       const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-      if (max) maxAtlasHeight = Math.min(8192, max);
+      if (max) maxAtlasHeight = Math.min(2048, max);
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     }
   } catch (e) {
@@ -1331,7 +1366,17 @@ function syncPins() {
   });
 }
 
+// 异常防护壳：任一图层构建器抛异常时，此前会连 setProps 都没执行、整批 deck 图层
+// 静默消失（表现就是"地图空白但没报错"）。这里捕获并打出明确报错，同时清空旧图层。
 function updateLayers() {
+  try {
+    updateLayersInner();
+  } catch (e) {
+    console.error('[layers] 图层构建异常：', e);
+    try { deckOverlay && deckOverlay.setProps({ layers: [] }); } catch (_) {}
+  }
+}
+function updateLayersInner() {
   if (!deckOverlay) return;
   const layers = [];
   if (mode === 'china') {
@@ -1755,7 +1800,22 @@ function addOverlayOnce() {
     // 悬停提示：仅对「历代政区界」生效，鼠标移到某块政区上就显示"名称（类型）"，
     // 让用户先知道这里可以点（此前无任何 hover 反馈，很容易误判为图层没生效）。
     deckOverlay = new MapboxOverlay({
+      // 双 context（deck 独立 WebGL）：Edge+Intel 集显上，合并 context（interleaved:true）
+      // 会让 deck 跟着 MapLibre 的 context 一起崩（context lost 后 deck 图层整批消失、
+      // 只剩 DOM 图钉）。独立 context 下其他模式均能出图，近代史重载由 useDevicePixels 减压。
       interleaved: false,
+      // 渲染分辨率上限 1.5x：高 DPI 屏（缩放 150%+）上 deck 默认按物理像素渲染，
+      // 片元量翻数倍，是集显死锁的主推手。1.5x 视觉几乎无损、负载大降。
+      useDevicePixels: Math.min(1.5, window.devicePixelRatio || 1),
+      // deck 内部异常钩子：此前 deck 层渲染失败会静默空白，看不到任何报错
+      onError: (e) => console.error('[deck] 图层异常：', e && (e.error || e)),
+      // 上下文丢失/恢复钩子（决定性诊断）：若 Edge 上反复触发 lost，就是这台
+      // Intel 集显的 WebGL context 在死锁后无法恢复 —— 表现正是“空白 + 无任何报错 + 卡死”。
+      onContextLost: (e) => console.error('[deck] ⚠️ WebGL 上下文丢失（lost），地图数据层将无法渲染', e),
+      onContextRestored: () => {
+        console.info('[deck] WebGL 上下文已恢复，正在重建图层');
+        updateLayers();
+      },
       layers: [],
       getTooltip: ({ object, layer }) => {
         if (!object || layer?.id !== 'china-regions') return null;
@@ -1783,12 +1843,18 @@ function addOverlayOnce() {
   }
 }
 
-// 底图（demotiles）加载失败时的回落样式：纯背景，疆域仍可在其上渲染
-const FALLBACK_STYLE = {
+// 内置底图样式（不依赖任何外部瓦片/网络）：纯海蓝背景。
+// 此前用 demotiles.maplibre.org 境外栅格瓦片作底图，在国内网络常被墙/超时，
+// 失败回落褐色、瓦片解码又吃集显显存，是 Edge+Intel 集显 WebGL 死锁的诱因之一。
+// 改为内置背景后：零网络依赖、零栅格纹理显存，疆域/控制区等矢量要素直接画在干净画布上。
+// 世界模式的国家边界由 CShapes（进入世界模式时按需加载）提供，无需底图瓦片。
+const BASE_STYLE = {
   version: 8,
   sources: {},
-  layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#0d1b2a' } }],
+  layers: [{ id: 'bg', type: 'background', paint: { 'background-color': SEA_COLOR } }],
 };
+// 底图（外部瓦片）加载失败时的回落样式：纯背景，疆域仍可在其上渲染
+const FALLBACK_STYLE = BASE_STYLE;
 
 // —— 中国水系补充集（scripts/gen-china-hydro.mjs 生成，NE 1:10m 裁切）——
 // 底图的河流/湖泊来自 Natural Earth 1:50m，那个级别对中国内部删减很多：
@@ -1955,8 +2021,16 @@ async function loadChinaProvinces() {
     console.error('[chinahist] 省界底板全部来源失败 → 历史疆域/政权疆域无法生成（请确认 public/data/china_provinces.geojson 存在）');
     return;
   }
-  chinaProvinces = gj.features || [];
-  console.info(`[chinahist] 已加载当代省界底板 ${chinaProvinces.length} 个要素`);
+  chinaProvinces = (gj.features || []).map((f) => {
+    // 几何抽稀：省界底板（DataV 全量，含县界）顶点极密，在 Intel 集显等弱 GPU 上
+    // 直接撑爆显存/触发 WebGL 死锁。容差 0.02°（约 2km）在国级缩放下形状无差，
+    // 顶点数可砍掉一大半，显著降低 deck.gl 的几何缓冲显存压力。
+    if (f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')) {
+      f.geometry = simplifyGeometry(f.geometry, 0.02);
+    }
+    return f;
+  });
+  console.info(`[chinahist] 已加载当代省界底板 ${chinaProvinces.length} 个要素（已几何抽稀）`);
   clearTerritoryCache(); // 省界到位后必须清缓存，否则疆域沿用"无数据"时空结果
   if (mode === 'chinaHist') updateLayers();
 }
@@ -1978,6 +2052,47 @@ async function loadChinaPreqin() {
   } catch (e) {
     console.warn('[chinahist] 先秦几何加载失败（可选）：', e.message);
   }
+}
+
+// 世界疆域(CShapes 26MB)：仅「世界地图」模式需要。此前在初始化无条件加载，
+// 导致只看中国/近代史也要先解析 26MB 世界数据，在 Intel 集显等弱 GPU 上
+// 直接把渲染进程压到死锁。改为进入世界模式时才加载（仅一次）。
+async function ensureWorldData() {
+  if (cshapesLoaded) return;
+  cshapesLoaded = true;
+  const loadingEl = document.getElementById('loading');
+  if (loadingEl && mode === 'world') {
+    loadingEl.classList.remove('hidden');
+    loadingEl.textContent = '正在加载世界历史疆域（CShapes 26MB，约需数秒到 1 分钟）…';
+  }
+  try {
+    const ts = await loadCShapes();
+    territories = ts;
+    precomputeTerritoryMeta();
+    buildGwcodeIndex();
+    computeLabelChars();
+    updateLayers();
+    if (loadingEl) {
+      if (territories.length === 0) {
+        loadingEl.textContent = '⚠️ 历史疆域(CShapes)加载失败，请检查网络或控制台后刷新重试';
+      } else {
+        loadingEl.classList.add('hidden');
+      }
+    }
+  } catch (e) {
+    console.error('[CShapes] 加载失败：', e);
+    territories = [];
+    if (loadingEl) loadingEl.classList.add('hidden');
+  }
+}
+
+// 中国历代数据(朝代疆域/王朝轮廓/历代政区)：仅「中国疆域」「中国古代史」模式需要。
+// 同样改为进入对应模式时才加载（之前初始化无条件拉，近代史模式白白扛几千要素）。
+async function ensureChinaHistData() {
+  if (chinaHistDataLoaded) return;
+  chinaHistDataLoaded = true;
+  await Promise.all([loadChina(), loadChinaOutline(), loadChinaRegions()]);
+  if (mode === 'china' || mode === 'chinaHist') updateLayers();
 }
 
 // 当代省级界线：**不填充**（用户要求全透明），只按虚线画界线，且画在疆域填充之上，
@@ -2140,11 +2255,15 @@ function setMode(m) {
     applyRelief();      // MapLibre 地形晕渲需随默认值重新生效
     applyBasemapLand(); // 今地图开关同理
   }
-  // 首次进入中国古代史 / 中国近代史模式时懒加载当代省界底图（非阻断：失败静默跳过）
-  if ((m === 'chinaHist' || m === 'modern') && !chinaProvincesLoaded) {
+  // 首次进入「中国疆域 / 中国古代史 / 中国近代史」模式时懒加载当代省界底图（非阻断）
+  if ((m === 'china' || m === 'chinaHist' || m === 'modern') && !chinaProvincesLoaded) {
     chinaProvincesLoaded = true;
     loadChinaProvinces();
   }
+  // 世界疆域(CShapes 26MB) 仅世界模式需要 → 进入世界模式才加载
+  if (m === 'world') ensureWorldData();
+  // 中国历代数据(轮廓/政区/朝代) 仅中国疆域/古代史模式需要 → 进入才加载
+  if (m === 'china' || m === 'chinaHist') ensureChinaHistData();
   // 先秦真实几何（夏/西周）：同样懒加载，仅第三幅图用
   if (m === 'chinaHist' && !chinaPreqinLoaded) {
     chinaPreqinLoaded = true;
@@ -2188,12 +2307,37 @@ function onZoom() {
   }
 }
 
+// WebGL 渲染后端检测：MapLibre / deck.gl 全靠 WebGL。若浏览器走软件渲染
+//（SwiftShader / Basic Render / llvmpipe），密集矢量地图会极度卡顿——
+// 这在 Edge/Chrome 关闭"硬件加速"时最常见，也是"地图卡得厉害"的首要嫌疑。
+function checkWebGLRenderer() {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (!gl) {
+      console.warn('[兼容性] 当前浏览器未启用 WebGL，地图将无法硬件加速（会非常卡或不可用）。' +
+        '请到浏览器设置开启硬件加速后重试。');
+      return;
+    }
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const r = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
+    if (/swiftshader|software|basic render|llvmpipe|microsoft basic/i.test(r)) {
+      console.warn('[兼容性] 检测到 WebGL 软件渲染后端（' + r + '）。' +
+        'MapLibre/deck.gl 这类 WebGL 地图在软件渲染下会极度卡顿。' +
+        '请在浏览器开启硬件加速：Edge → edge://settings/system → 打开"使用图形加速（可用时）"，重启浏览器。');
+    } else if (r) {
+      console.info('[WebGL] 渲染后端：' + r);
+    }
+  } catch (_) {}
+}
+
 async function init() {
   const loadingEl = document.getElementById('loading');
+  checkWebGLRenderer();
   try {
     map = new maplibregl.Map({
       container: 'map',
-      style: 'https://demotiles.maplibre.org/style.json',
+      style: BASE_STYLE,
       center: WORLD_CENTER,
       zoom: WORLD_ZOOM,
       attributionControl: true,
@@ -2225,12 +2369,30 @@ async function init() {
       applyRelief();
     });
     map.on('error', (e) => {
-      console.error('[map error]', e && e.error);
-      // 底图（demotiles）加载失败 → 回落到纯背景样式，疆域仍可显示
-      try {
-        map.setStyle(FALLBACK_STYLE);
-      } catch (_) {}
-      tryAddOverlay();
+      const err = e && e.error;
+      const msg = (err && err.message) || '';
+      const src = e && e.sourceId;
+      // 地形晕渲（hillshade/dem）在当前 GPU/驱动下渲染失败（如 Intel 集显 framebuffer 崩溃）：
+      // 仅关闭地形图层、不再重试，切忌重设样式——否则会陷入「渲染失败→重设样式→再次渲染失败」死循环
+      if (src === 'dem' || reliefFailed || /hillshade|framebuffer|terrain|dem/i.test(msg)) {
+        reliefFailed = true;
+        try { if (map.getLayer('hillshade')) map.setLayoutProperty('hillshade', 'visibility', 'none'); } catch (_) {}
+        console.warn('[relief] 地形晕渲在当前 GPU/驱动下渲染失败，已自动关闭以避免地图崩溃。', msg);
+        return;
+      }
+      console.error('[map error]', err);
+      // 底图已改为内置纯背景（无外部瓦片），不再需要「加载失败→重设样式」回落，
+      // 否则重设样式会反复重置叠加层、在弱 GPU 上雪上加霜。仅记录错误。
+    });
+    // WebGL 上下文丢失防护：允许浏览器尝试恢复，避免丢失后永久黑屏/卡死
+    // （Intel 集显 + 双 WebGL context 下偶发上下文丢失，deck.gl 会在失效缓冲上刷出大量 glDrawElements 错误）
+    map.on('webglcontextlost', (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      console.warn('[WebGL] 上下文丢失，已请求浏览器恢复（频繁发生多为 GPU/集显压力，可关闭地形晕渲并减少图层）');
+    });
+    map.on('webglcontextrestored', () => {
+      console.info('[WebGL] 上下文已恢复，正在重建图层');
+      try { tryAddOverlay(); updateLayers(); } catch (_) {}
     });
     map.on('zoom', onZoom); // 缩放时刷新图层（标签随缩放显隐）
 
@@ -2402,57 +2564,34 @@ async function init() {
       }
       document.getElementById('event-list')?.classList.add('hidden');
     });
-    // 后台加载中国疆域：底图 + 王朝轮廓 + 历代政区
-    Promise.all([loadChina(), loadChinaOutline(), loadChinaRegions()]).then(() => {
-      if (mode === 'china') updateLayers();
-    });
     updateYearLabel();
     updateLayers();
 
-    // 并行加载四类数据（此前是串行 await：CShapes 26MB 卡住时河流/山脉压根没开始
-    // 加载，造成"山脉不显示/河名不显示/永远在加载"三连）。单项失败只影响自身。
-    const TOTAL = 4;
-    let done = 0;
-    let cshapesDone = false;
-    const settle = () => {
-      done++;
-      if (done < TOTAL) {
-        // 三类小数据先到时，剩下的一定是 26MB 的 CShapes，给出明确预期
-        loadingEl.textContent = cshapesDone
-          ? `正在加载数据（${done}/${TOTAL}）…`
-          : '正在加载历史疆域（CShapes 26MB，约需数秒到 1 分钟）…';
+    // 仅后台加载轻量背景数据（河流/山脉/湖泊）。世界疆域(CShapes 26MB)与中国历代数据
+    // 改为进入对应模式才加载（见 setMode 中的 ensureWorldData / ensureChinaHistData），
+    // 避免只看中国近代史也要先扛几十 MB + 几千要素的解析与首屏渲染压力。
+    const lightDone = { rivers: false, mountains: false, lakes: false };
+    const refresh = () => { computeLabelChars(); updateLayers(); };
+    const lightSettle = () => {
+      // 世界模式：CShapes 仍在加载时（ensureWorldData 负责隐藏）不要提前隐藏
+      if (mode === 'world' && !cshapesLoaded) return;
+      if (!lightDone.rivers || !lightDone.mountains || !lightDone.lakes) {
+        loadingEl.textContent = '正在加载背景地理数据…';
         return;
       }
-      if (territories.length === 0) {
-        loadingEl.textContent =
-          '⚠️ 历史疆域(CShapes)加载失败，河流/山脉图层仍可用。请检查网络或控制台报错后刷新重试';
-      } else {
-        loadingEl.classList.add('hidden');
-      }
+      loadingEl.classList.add('hidden');
     };
-    const refresh = () => {
-      computeLabelChars();
-      updateLayers();
+    const onLight = (key) => () => { lightDone[key] = true; refresh(); lightSettle(); };
+    const onLightErr = (key, name) => (e) => {
+      console.error(`[${name}] 加载失败：`, e);
+      lightDone[key] = true; lightSettle();
     };
+    loadRivers().then(onLight('rivers')).catch(onLightErr('rivers', 'rivers'));
+    loadMountains().then(onLight('mountains')).catch(onLightErr('mountains', 'mountains'));
+    loadLakes().then(onLight('lakes')).catch(onLightErr('lakes', 'lakes'));
 
-    loadCShapes()
-      .then((ts) => {
-        cshapesDone = true;
-        territories = ts;
-        precomputeTerritoryMeta();
-        buildGwcodeIndex(); // 建 GW 编码索引（供“被谁占领/殖民”查询）
-        refresh();
-        settle();
-      })
-      .catch((e) => {
-        console.error('[CShapes] 加载失败：', e);
-        cshapesDone = true;
-        territories = [];
-        settle();
-      });
-    loadRivers().then(() => { refresh(); settle(); });
-    loadMountains().then(() => { refresh(); settle(); });
-    loadLakes().then(() => { refresh(); settle(); });
+    // 默认模式为世界地图 → 首屏即加载世界疆域；其余模式的数据留到切 tab 时再加载
+    if (mode === 'world') ensureWorldData();
   } catch (e) {
     loadingEl.classList.remove('hidden');
     loadingEl.textContent = '初始化失败：' + (e && e.message ? e.message : e);

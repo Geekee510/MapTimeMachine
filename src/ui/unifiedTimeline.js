@@ -6,7 +6,7 @@
 //
 // 顶部一条「年份进度条」：可点 / 可拖，带 ◀ ▶ 与当前年读数，左右前进后退年份。
 // 当前年在泳道上以一条**浅色竖条**覆盖四条泳道；竖条旁直接浮出**当年各泳道大事**
-// （彩色 chip + 名称），不再把事件压缩到最下面。
+// （彩色 chip + 年份 + 标题 + 简述），不再把事件压缩到最下面。
 //
 // 与 storyStage 解耦：本组件只负责"导航与总览"，打开动画通过回调交回 main.js
 // （onOpenStage），避免循环依赖。
@@ -84,11 +84,20 @@ function buildMatrix() {
   return cells;
 }
 
-function firstSentence(s, n = 84) {
+// 取前 n 个句子（以。！？切分），并限制总字数。
+// 用于解说框：首句常是背景概述，真正的事件名（如"南昌起义"）在第二句起，
+// 所以取前两句才能把当年大事显示出来，而不是只截一句背景。
+function firstSentences(s, n = 2, maxChars = 150) {
   const t = (s || '').replace(/\s+/g, ' ').trim();
-  const m = t.match(/^[^。！？]+[。！？]?/);
-  const base = m ? m[0] : t;
-  return base.length > n ? base.slice(0, n) + '…' : base;
+  const parts = t.match(/[^。！？]*[。！？]?/g) || [];
+  let out = '';
+  for (const p of parts) {
+    if (!p) continue;
+    if (out.length + p.length > maxChars && out) break;
+    out += p;
+    if ((out.match(/[。！？]/g) || []).length >= n) break;
+  }
+  return out.length > maxChars ? out.slice(0, maxChars) + '…' : out;
 }
 
 // 把一段文字按像素宽折行（CJK 约 13px，其余约 7px），用于浮标里多行显示事件详情。
@@ -189,12 +198,15 @@ export function createUnifiedTimeline({ onOpenStage } = {}) {
 
       B.rows.forEach((r) => {
         const st = r.st;
-        let x1 = xOf(r.sp.start);
-        let x2 = xOf(r.sp.end);
+        // 色条按「整年」铺设：起点对齐事件开始年的年初、终点对齐结束年的年末，
+        // 使跨越 N 年的事件在视觉上清晰覆盖这 N 年（而非只画真实月跨度的窄条）。
+        // 精确的起止月份仍保留在 <title> 与浮标里，不丢失信息。
+        let x1 = xOf(Math.floor(r.sp.start));
+        let x2 = xOf(Math.floor(r.sp.end) + 1);
         let w = x2 - x1;
         const minW = 12;
         let dx = x1;
-        if (w < minW) w = minW;        // 左缘对齐真实起点，与年线对齐
+        if (w < minW) { dx = x1 - (minW - w) / 2; w = minW; }  // 极短段兜底居中
         if (dx + w > X1) w = X1 - dx;  // 勿超出右边界
         s += `<g class="ut-seg" data-topic="${B.t.id}" data-idx="${r.j}">`;
         s += `<title>${st.title}（${st.period}）</title>`;
@@ -240,7 +252,23 @@ export function createUnifiedTimeline({ onOpenStage } = {}) {
     const g = svgHost.querySelector('#ut-cursor');
     if (!g) return;
     const yr = curYear;
-    const bx = xOf(yr);
+    // 竖条对齐到「所选年份当年最早事件的真实起点」，使其落在色块左缘上（覆盖事件）。
+    // 否则事件从年中开始（如 1927.08）时，竖条停在整数年年初、与色块左缘差十几像素，
+    // 看起来像”竖条没盖住事件“。年份徽章跟随竖条，保持两者一致。
+    let barYr = yr;
+    const evtStarts = [];
+    for (const B of LAYOUT.blocks) {
+      const evs = cells[yr] && cells[yr][B.t.id];
+      if (evs) for (const e of evs) {
+        const sp = parsePeriod(e.period);
+        // 与色条整年铺设一致：取该段在「所选年份」可见的整年左缘 = max(起始年, 所选年)。
+        // 跨年长段（如北伐 1924.01–1927.07）在选中 1926 时，整年可见起点是 1926 而非 1924，
+        // 避免竖条被拉回最初起点后整段年份钉死不动；同时与色条整年起点重合。
+        evtStarts.push(Math.max(Math.floor(sp.start), yr));
+      }
+    }
+    if (evtStarts.length) barYr = Math.min(...evtStarts);
+    const bx = xOf(barYr);
     const topY = LAYOUT.blocks[0].top;
     const botY = LAYOUT.blocks[LAYOUT.blocks.length - 1].bottom;
 
@@ -264,13 +292,15 @@ export function createUnifiedTimeline({ onOpenStage } = {}) {
       const phaseTag = B.t.id === 'resistance-1931-1945'
         ? (yr >= PHASE_YEAR ? '（全面抗战）' : '（局部抗战）')
         : '';
-      // 同一年同一泳道可能多件（如 1937 抗），各显示「标题 + 简述」，最多 3 件
+      // 同一年同一泳道可能多件（如 1937 抗），各显示「标题 + 当年大事简述」，最多 3 件
       const MAX_EV = 3;
       const shown = evs.slice(0, MAX_EV);
       const entries = shown.map((e) => ({
         e,
+        // 标题：彩色 chip 已标识分类，标题即事件名（不再把年份写进框里）
         titleLines: wrapText(e.title + phaseTag, CARD_W - 30).slice(0, 2),
-        leadLines: wrapText(firstSentence(e.lead, 110), CARD_W).slice(0, 2),
+        // 简述：取前两句（含具体事件名，如"南昌起义"），而不是只截第一句背景
+        leadLines: wrapText(firstSentences(e.lead, 2, 150), CARD_W).slice(0, 3),
       }));
       // 估算卡片高度
       let h = CARD_PAD * 2;
